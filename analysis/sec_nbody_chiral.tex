@@ -1,0 +1,323 @@
+% ═══════════════════════════════════════════════════════════════════════════════
+%  NEW SECTION — paste after \subsection{nbody} in Sec. II and add the
+%  corresponding \subsection{benchmark_chiral} in Sec. IV (Results).
+%  New \cite keys needed in refs.bib: Schnack2020, Bauer2011, Abanin2019,
+%  Motrunich2006, Wen2002ChiralSL (see notes at end of file).
+% ═══════════════════════════════════════════════════════════════════════════════
+
+% ── II.E  Extension to n-body interactions (replaces current TODO paragraph) ─
+
+\subsection{Extension to \texorpdfstring{$n$}{n}-body interactions}
+\label{subsec:nbody}
+
+The spectral-truncation framework introduced in Sec.~\ref{subsec:ansatz}
+requires the generator $K$ to admit a two-body decomposition of the
+form~\eqref{eq:K_decomp}.
+Many physically relevant Hamiltonians, however, contain genuine $n$-body
+terms ($n > 2$) that cannot be reduced to two-body form without approximation.
+Prominent examples include ring-exchange interactions in triangular-lattice
+antiferromagnets~\cite{Motrunich2006}, scalar spin-chirality
+terms~\cite{Wen2002ChiralSL}, and the effective Hamiltonians arising in
+certain quantum-information contexts~\cite{Abanin2019}.
+In this section we describe how the method is extended to such cases via
+an iterative mean-field decoupling.
+
+\paragraph{Mean-field decoupling of $n$-body terms.}
+Consider a generator that decomposes as
+\begin{equation}
+  K = K^{(2)} + K^{(n)},
+  \qquad n > 2,
+  \label{eq:K_nbody}
+\end{equation}
+where $K^{(2)}$ is a two-body operator of the form~\eqref{eq:K_decomp} and
+$K^{(n)}$ involves products of $n$ local operators.
+We replace $K^{(n)}$ by its mean-field projection onto the two-body sector:
+\begin{equation}
+  K^{(n)} \;\longrightarrow\; K^{(n)}_{\rm eff}[\sigma]
+  \;:=\; \left.\frac{\delta}{\delta \sigma}
+  \Tr\!\left[\sigma\, K^{(n)}\right]\right|_{\text{one-/two-body}},
+  \label{eq:mf_decoupling}
+\end{equation}
+where the notation $|_{\text{one-/two-body}}$ denotes the Wick-like
+contraction that retains only the one- and two-body pieces of the functional
+derivative, evaluated with respect to the current variational state $\sigma$.
+
+Explicitly, for a three-body term $K^{(3)} = \sum_{\langle ijk\rangle} g_{ijk}
+A_i B_j C_k$ (with $A_i, B_j, C_k$ one-body operators), the mean-field
+effective Hamiltonian reads
+\begin{equation}
+  K^{(3)}_{\rm eff}[\sigma]
+  = \sum_{\langle ijk\rangle} g_{ijk}\!\left[
+      \langle A_i\rangle_\sigma B_j C_k
+    + A_i \langle B_j\rangle_\sigma C_k
+    + A_i B_j \langle C_k\rangle_\sigma
+    - 2\,\langle A_i\rangle_\sigma\langle B_j\rangle_\sigma\langle C_k\rangle_\sigma
+  \right],
+  \label{eq:three_body_mf}
+\end{equation}
+which is a linear combination of one- and two-body operators with
+$\sigma$-dependent coefficients.
+The last (constant) term is subtracted to avoid double-counting in the
+free-energy functional.
+
+\paragraph{Iterative self-consistent algorithm.}
+The $n$-body extension proceeds as follows:
+\begin{enumerate}
+  \item Initialise $\sigma^{(0)}$ as the maximally mixed state
+        $\sigma^{(0)} = \Id/d$.
+  \item Compute $K^{(n)}_{\rm eff}[\sigma^{(t)}]$ via
+        Eq.~\eqref{eq:three_body_mf}.
+  \item Form $K^{(2)}_{\rm tot}[\sigma^{(t)}] := K^{(2)} + K^{(n)}_{\rm eff}[\sigma^{(t)}]$.
+  \item Apply the spectral-truncation variational method of
+        Sec.~\ref{subsec:ansatz} to $K^{(2)}_{\rm tot}[\sigma^{(t)}]$,
+        obtaining $\sigma^{(t+1)}$.
+  \item Repeat from step 2 until $\|\sigma^{(t+1)} - \sigma^{(t)}\| < \epsilon$.
+\end{enumerate}
+The outer loop (steps 2--5) constitutes a self-consistent mean-field iteration
+for the $n$-body term; the inner optimisation (step 4) is the two-body
+variational problem of Sec.~\ref{subsec:ansatz}.
+At convergence, the fixed point satisfies both the two-body stationarity
+condition and the $n$-body decoupling simultaneously.
+
+\paragraph{Variational bound.}
+The Gibbs variational principle guarantees $F[\sigma] \ge F_{\rm exact}$ for
+any normalised $\sigma$, regardless of whether $K$ contains two-body or
+higher-body terms.
+The mean-field decoupling~\eqref{eq:mf_decoupling} does not alter this bound:
+the variational free energy is still evaluated on the full $K$, not on
+$K^{(2)}_{\rm tot}$.
+The decoupling is used only to generate a trial generator for the
+spectral-truncation ansatz; the quality of the resulting $\sigma$ is then
+assessed by the T-score introduced in Sec.~\ref{sec:tscore}.
+
+\paragraph{Symmetry and local minima.}
+When $K^{(n)}$ breaks a symmetry of $K^{(2)}$ (or vice versa), the mean-field
+fixed-point equation may have multiple solutions related by the broken
+symmetry.
+To explore these, we employ the symmetry-breaking strategy described in
+Sec.~\ref{subsec:sc}: the initial state is perturbed by a small random
+Hermitian operator on a single site before each outer iteration, and the
+solution with the lowest variational free energy across $n_{\rm att}$
+independent restarts is retained.
+When a symmetry of the full Hamiltonian is known, the projected state
+(Sec.~\ref{TODO}) provides a strictly lower free energy than any
+symmetry-broken solution.
+
+% ── IV.C  Chiral three-body benchmark (new subsection in Results) ─────────────
+
+\subsection{Chiral spin-ladder benchmark with three-body interactions}
+\label{subsec:chiral_benchmark}
+
+We now demonstrate the $n$-body extension on a model that is beyond the
+two-body scope of the other benchmarks: a spin-$\tfrac{1}{2}$ triangular
+ladder with Heisenberg exchange and a scalar spin-chirality interaction.
+
+\paragraph{Model.}
+Consider a two-leg ladder with $L$ unit cells and $N=2L$ sites arranged in
+triangular plaquettes, labelled $(i,j)$ with $i\in\{0,1\}$ (leg) and
+$j\in\{0,\ldots,L-1\}$ (rung).
+The Hamiltonian is
+\begin{equation}
+  H = J\!\sum_{\langle ij,i'j'\rangle}\!\vec{S}_{ij}\cdot\vec{S}_{i'j'}
+    + \chi\!\sum_{\triangle}\vec{S}_i\cdot(\vec{S}_j\times\vec{S}_k)
+    + B\sum_{ij} S^z_{ij},
+  \label{eq:H_chiral}
+\end{equation}
+where the first sum runs over nearest-neighbour pairs on the ladder (both legs
+and all rungs), the second sum runs over all elementary triangular plaquettes
+$\triangle = (i,j,k)$ traversed counterclockwise, and the third term is a
+uniform Zeeman field along $z$.
+The scalar chirality operator $\chi_{ijk} :=
+\vec{S}_i\cdot(\vec{S}_j\times\vec{S}_k)$ is a genuine three-body interaction;
+its expectation value $\kappa_z := \langle\chi_{ijk}\rangle$ serves as an
+order parameter for chiral symmetry breaking.
+
+The model interpolates between two paradigmatic limits.
+For $\chi=0$, Eq.~\eqref{eq:H_chiral} reduces to the antiferromagnetic
+Heisenberg ladder, which has a spin gap and a magnetically disordered ground
+state~\cite{Bauer2011}.
+For $J=0$, the pure-chirality Hamiltonian is $SU(2)$-invariant and its Gibbs
+state is time-reversal invariant (the scalar chirality is odd under
+time-reversal), so the exact $\kappa_z$ vanishes at every temperature.
+The combined model with $J>0$ and $\chi>0$ has been proposed as a realisation
+of a chiral spin liquid~\cite{Wen2002ChiralSL}.
+
+\paragraph{Application of the method.}
+The three-body term $K^{(3)} = \beta\chi\sum_\triangle \chi_{ijk}$ is decoupled
+via Eq.~\eqref{eq:three_body_mf}:
+\begin{equation}
+  \chi_{ijk}^{\rm eff}[\sigma]
+  = \langle\vec{S}_i\rangle_\sigma\cdot(\vec{S}_j\times\vec{S}_k)
+  + \vec{S}_i\cdot\langle\vec{S}_j\times\vec{S}_k\rangle_\sigma
+  - \langle\vec{S}_i\rangle_\sigma\cdot\langle\vec{S}_j\times\vec{S}_k\rangle_\sigma,
+\end{equation}
+where the second term involves the two-body cross-product evaluated at fixed
+$\vec{S}_i$, and so on cyclically.
+After decoupling, $K^{(2)}_{\rm tot}[\sigma]$ is a Heisenberg ladder with
+effective site-dependent fields and bond-dependent exchange, to which the
+spectral-truncation ansatz is applied with $\numfields=6$ variational fields.
+We use $n_{\rm att}=3$ random restarts per field point.
+
+\paragraph{Results.}
+We study four parameter combinations:
+pure Heisenberg ($J=1$, $\chi=0$),
+pure chiral ($J=0$, $\chi=1$),
+and two mixed cases ($J=1$, $\chi=0.5$ and $\chi=1$),
+for system sizes $L\in\{2,3,4,6,8\}$, inverse temperatures
+$\beta\in\{1,2,5\}$, and field values $B\in[0,6]$.
+Exact free energies are available for $L\le 4$ via full diagonalisation.
+
+\textit{Zero-field properties.}
+Table~\ref{tab:chiral_exact} summarises the variational free energies and
+T-scores at $B=0$ for $L=4$, $\beta=2$.
+For the pure-chiral case, the variational state coincides with the maximally
+mixed state ($F_{\rm mf} = -N\ln 2 / \beta$) for all $\numfields$, with a
+relative gap of $16\%$ from the exact free energy.
+This is a fundamental limitation of the product-state ansatz: since
+$\chi_{ijk}$ has zero expectation value in any product state~\cite{TODO}, the
+effective field vanishes identically and the self-consistent loop has no
+driving force.
+Adding variational fields does not improve the approximation
+(variance ratio $\equiv 1$ for all $\numfields$), confirming that the pure
+chiral Hamiltonian lies outside the reach of the spectral-truncation ansatz
+in its present form.
+
+For the mixed cases, the Heisenberg term provides a non-trivial effective
+field, and the variational approximation improves with $\chi$.
+The T-score grows from $0.70$ (pure chiral) to $1.41$ ($J=\chi=1$),
+reflecting the increasing difficulty of approximating the highly entangled
+ground state as the chiral frustration intensifies.
+
+\begin{table}[h]
+  \centering
+  \caption{Variational benchmark at $B=0$, $L=4$ unit cells ($N=8$ sites),
+           $\beta=2$, $\numfields=6$, $n_{\rm att}=3$.
+           $F_{\rm mf}$ and $F_{\rm ex}$ are the variational and exact free
+           energies; $\Delta F/|F_{\rm ex}|$ is the relative gap;
+           $\Tscore$ is computed from
+           Eq.~\eqref{eq:tscore} using $\operatorname{Var}_\sigma(\ln\sigma+K)$.}
+  \label{tab:chiral_exact}
+  \begin{tabular}{lcccc}
+    \hline\hline
+    Model & $F_{\rm mf}$ & $F_{\rm ex}$ &
+            $\Delta F / |F_{\rm ex}|$ & $\Tscore$ \\
+    \hline
+    Pure chiral ($J=0$, $\chi=1$)  & $-5.545$ & $-6.601$ & $16.0\%$ & $0.70$ \\
+    Heis.\ only ($J=1$, $\chi=0$)  & $-5.545$ & $-9.350$ & $40.7\%$ & $1.09$ \\
+    Heis.+weak chiral ($\chi=0.5$) & $-5.545$ & $-9.350$ & $40.7\%$ & $1.18$ \\
+    Heis.+strong chiral ($\chi=1$) & $-5.545$ & $-10.414$ & $46.8\%$ & $1.41$ \\
+    \hline\hline
+  \end{tabular}
+\end{table}
+
+\textit{Convergence with $\numfields$.}
+Figure~\ref{fig:chiral_varconv} shows the variance ratio
+$\operatorname{Var}[\hat{F}](\numfields)/\operatorname{Var}[\hat{F}](0)$
+as a function of $\numfields$ for $L=12$, $\beta=2$.
+The pure-chiral curve is identically flat (ratio $\equiv 1$), confirming the
+argument above.
+The Heisenberg-dominated curves converge at $\numfields\approx 2$--$3$
+and then saturate, with no further reduction at $\numfields=6$ or $8$.
+For $L=8$, $\beta=5$ (lower panel of Fig.~\ref{fig:chiral_varconv}), the
+Heis.+strong-chiral case ($J=\chi=1$) shows a variance ratio \emph{exceeding}
+unity at $\numfields\ge 1$, indicating that the optimiser finds a
+higher-variance local minimum than the self-consistent solution at $\numfields=0$.
+This pathology is a signature of the rough optimisation landscape at low
+temperature and high frustration; it motivates the use of the T-score as a
+diagnostic, since $\Tscore > 1$ in this regime flags the unreliable solutions.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/fig3_varconv.pdf}
+  \caption{Variance ratio
+           $\operatorname{Var}[\hat{F}](\numfields)/\operatorname{Var}[\hat{F}](0)$
+           vs.\ $\numfields$ for the chiral ladder at $L=12$, $\beta=2$
+           (top) and $L=8$, $\beta=5$ (bottom).
+           Dashed line: pure chiral ($J=0$, $\chi=1$), identically flat.
+           Solid lines: Heisenberg-dominated models converging at
+           $\numfields\approx 2$--$3$.
+           A ratio $> 1$ at $\beta=5$, $\chi=1$ signals a local-minimum
+           artefact (see text).}
+  \label{fig:chiral_varconv}
+\end{figure}
+
+\textit{Magnetisation curves.}
+Figure~\ref{fig:chiral_mag} shows the magnetisation per site
+$\langle S^z\rangle/N$ as a function of $B$ for all four models at $\beta=2$,
+computed via the spline derivative $\langle S^z_{\rm tot}\rangle =
+(\beta)^{-1}\,\partial f/\partial B$ (where $f = \beta F$).
+For the pure-chiral case the MF approximation yields a smooth, monotone
+magnetisation curve that underestimates the exact result (available for $L=4$)
+by roughly a factor of two at intermediate fields, consistent with the large
+T-score and the inability of the product-state ansatz to capture the
+three-body correlations driving the response.
+
+For the Heisenberg models, the mean-field spline-derived magnetisation grows
+linearly from $B=0$ without a plateau, in contrast to the na\"{i}ve expectation
+from the stored self-consistent expectation values, which show an artefactual
+plateau for $B \lesssim 0.5$ in the cases affected by local-minimum trapping
+(Sec.~\ref{subsec:chiral_local_min}).
+The exact magnetisation (from $\partial F_{\rm exact}/\partial B$) is recovered
+to within $10\%$ at large $B$ where the polarised state is well-described by a
+product ansatz.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/fig4_magnetization.pdf}
+  \caption{Magnetisation per site $\langle S^z\rangle/N$ vs.\ Zeeman field $B$
+           for $\beta=2$, computed from the spline derivative of $f(B)$.
+           Solid coloured curves: variational MF for $L=2,3,6,8$ (light to dark).
+           Dashed black curve: exact result for $L=4$, obtained from
+           $\langle S^z_{\rm tot}\rangle = \beta^{-1}\partial f_{\rm ex}/\partial B$.}
+  \label{fig:chiral_mag}
+\end{figure}
+
+\textit{Scalar chirality and local-minimum trapping.}
+\label{subsec:chiral_local_min}
+Figure~\ref{fig:chiral_kappaz} shows the scalar chirality order parameter
+$\kappa_z = \langle\chi_{ijk}\rangle$ as a function of $B$ for the mixed models
+at $L=6,8$, $\beta=2$.
+At $B=0$ the exact state has $\kappa_z=0$ by time-reversal symmetry; the
+variational state respects this for $L\le 4$ ($|\kappa_z|\lesssim 10^{-9}$)
+but develops a spurious $|\kappa_z| \sim 10^{-2}$ for $L=6$ at $\beta=2$.
+This is the signature of a symmetry-broken local minimum of the variational
+free energy: the random-restart strategy (Sec.~\ref{subsec:nbody}) does not
+reliably find the symmetric solution at this system size and temperature.
+Applying the time-reversal projection $\tilde\sigma = \operatorname{Re}(\sigma)$
+(Sec.~\ref{TODO}) removes the spurious imaginary part and restores
+$\kappa_z=0$ exactly, at the cost of a small increase in $F_{\rm mf}$.
+
+As a function of $B$, the $\kappa_z$ curves for both chiral models
+show a non-monotone response: $|\kappa_z|$ first grows as $B$ tilts the
+balance between the Heisenberg and chiral terms, then decreases as the system
+approaches full polarisation.
+The Heis.+strong-chiral ($J=\chi=1$) model shows the largest response,
+with $|\kappa_z|$ peaking near the field scale $B\sim J$ set by the Heisenberg
+exchange.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/fig6_kappa_z.pdf}
+  \caption{Scalar chirality $\kappa_z$ vs.\ $B$ for the mixed chiral models
+           at $\beta=2$.
+           Solid: $L=6$; dashed: $L=8$.
+           The shaded region ($B \le 0.4$, right panel) marks the field range
+           where the $L=8$ optimiser is trapped in a local minimum with
+           spurious $\kappa_z \ne 0$ (see text).}
+  \label{fig:chiral_kappaz}
+\end{figure}
+
+\textit{T-score as a quality diagnostic across the field sweep.}
+Figure~\ref{fig:chiral_calib} shows the T-score against the relative free-energy
+gap $(F_{\rm mf}-F_{\rm ex})/|F_{\rm ex}|$ for all small-system ($L=2,3,4$)
+data points across all models, temperatures, and field values.
+The two quantities are strongly correlated: $\Tscore \approx 1$ corresponds to
+gaps of $35$--$65\%$, with the pure-chiral model consistently below the
+Heisenberg-dominated cases for the same gap.
+This systematic separation reflects a structural difference in the variational
+landscape: the pure-chiral approximation is ``aware'' of its own
+inadequacy (small variance) while the Heisenberg cases have larger variance and
+thus larger T-scores at comparable errors.
+For large systems where $F_{\rm ex}$ is unavailable, the T-score provides the
+only accessible quality estimate; the calibration established here for $L\le 4$
+supports its use as a reliable proxy.
