@@ -135,14 +135,39 @@ def sorted_by(records, key):
     return sorted(records, key=lambda r: r[key])
 
 
-def exact_mag(rows):
-    """Numerical derivative dF_exact/dB ≈ ⟨Sz_tot⟩_exact."""
+def spline_mag(rows, field="f_exact"):
+    """Spline derivative giving ⟨Sz_tot⟩ = (1/beta) * df/dB at each B.
+
+    ``f`` stores the dimensionless free energy beta * F_thermo, so:
+
+        d(beta * F_thermo)/dB = beta * <Sz_tot>
+        =>  <Sz_tot> = (1/beta) * df/dB
+
+    A cubic interpolating spline (k=3, s=0) is used — stable and accurate
+    at both endpoints with the 20+ point grids used here.
+
+    Parameters
+    ----------
+    rows : list of dict
+        Records for a single (J, chi, L, beta) combination, in any order.
+    field : str
+        Key to use as the free energy column (``"f_exact"`` or ``"f"``).
+
+    Returns
+    -------
+    rows : list of dict
+        Records sorted by B.
+    mags : np.ndarray
+        ⟨Sz_tot⟩ at each B point.
+    """
+    from scipy.interpolate import UnivariateSpline
+
     rows = sorted_by(rows, "B")
-    mags = [None] * len(rows)
-    for i in range(1, len(rows) - 1):
-        dB = rows[i + 1]["B"] - rows[i - 1]["B"]
-        dF = rows[i + 1]["f_exact"] - rows[i - 1]["f_exact"]
-        mags[i] = dF / dB
+    beta = rows[0]["beta"]
+    Bs = np.array([r["B"] for r in rows])
+    Fs = np.array([r[field] for r in rows])
+    spl = UnivariateSpline(Bs, Fs, k=3, s=0)
+    mags = spl.derivative()(Bs) / beta
     return rows, mags
 
 
@@ -312,32 +337,37 @@ def fig4_magnetization(fs, out_dir):
     axes = axes.flatten()
 
     for ax, (name, J, chi, color, marker, full_label) in zip(axes, MODELS):
-        # MF curves: multiple L
-        for L in [2, 3, 4, 6, 8]:
-            rows = sorted_by(
-                select(fs, J=J, chi=chi, L=L, beta=beta), "B"
-            )
-            if not rows:
+        # MF curves via spline dF_mf/dB: multiple L
+        # (spline avoids the frozen-minimum plateau artifact in stored total_mag)
+        for L in [2, 3, 6, 8]:  # L=4 drawn separately with exact overlay
+            rows_L = select(fs, J=J, chi=chi, L=L, beta=beta)
+            if not rows_L:
                 continue
+            rows_L, mags_L = spline_mag(rows_L, field="f")
             N = 2 * L
-            Bs  = [r["B"] for r in rows]
-            mags = [r["total_mag"] / N for r in rows]
-            lw = 1.4 if L in (4, 8) else 0.8
-            ax.plot(Bs, mags, color=L_COLORS[L], lw=lw,
-                    label=f"MF $L={L}$")
+            Bs_L = [r["B"] for r in rows_L]
+            lw = 1.4 if L == 8 else 0.8
+            ax.plot(Bs_L, [m / N for m in mags_L],
+                    color=L_COLORS[L], lw=lw, label=f"MF $L={L}$")
 
-        # Exact (numerical derivative dF/dB), L=4
-        rows_ex = sorted_by(
-            [r for r in select(fs, J=J, chi=chi, L=4, beta=beta)
-             if r["f_exact"] is not None],
-            "B",
-        )
+        # MF magnetization via spline dF_mf/dB (solid, thin, L=4 reference)
+        rows_mf4 = select(fs, J=J, chi=chi, L=4, beta=beta)
+        if rows_mf4:
+            rows_mf4, mags_mf4 = spline_mag(rows_mf4, field="f")
+            N4 = 2 * 4
+            Bs_mf4 = [r["B"] for r in rows_mf4]
+            ax.plot(Bs_mf4, [m / N4 for m in mags_mf4],
+                    color=L_COLORS[4], lw=1.4, ls="-", zorder=3)
+
+        # Exact magnetization via spline dF_exact/dB, L=4
+        rows_ex = [r for r in select(fs, J=J, chi=chi, L=4, beta=beta)
+                   if r["f_exact"] is not None]
         if rows_ex:
-            rows_ex, mags_ex = exact_mag(rows_ex)
-            Bs_ex  = [rows_ex[i]["B"]     for i in range(1, len(rows_ex) - 1)]
-            ms_ex  = [mags_ex[i] / (2 * 4) for i in range(1, len(rows_ex) - 1)]
-            ax.plot(Bs_ex, ms_ex, color="black", lw=1.4, ls="--",
-                    label="exact $L=4$")
+            rows_ex, mags_ex = spline_mag(rows_ex, field="f_exact")
+            N4 = 2 * 4
+            Bs_ex = [r["B"] for r in rows_ex]
+            ax.plot(Bs_ex, [m / N4 for m in mags_ex],
+                    color="black", lw=1.4, ls="--", label="exact $L=4$")
 
         ax.axhline(0, color="gray", lw=0.5, ls=":")
         ax.axhline(-0.5, color="gray", lw=0.5, ls=":", alpha=0.5)
