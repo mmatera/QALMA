@@ -5,7 +5,7 @@ The model Hamiltonian is
 
     H = J  * sum_{<ij>} vec{s}_i . vec{s}_j
       + chi * sum_{triangles} vec{s}_i . (vec{s}_j x vec{s}_k)
-      + B   * sum_i S^z_i                        [Zeeman term]
+      - B   * sum_i S^z_i                        [Zeeman term]
 
 where the scalar triple product
 
@@ -27,7 +27,7 @@ two-body operators), making it a meaningful stress-test for the variational
 mean-field approach: the n_body_projection step in
 `variational_quadratic_mfa` must correctly handle three-body interactions.
 
-The Zeeman term ``B * sum_i S^z_i`` is a uniform field applied to all sites.
+The Zeeman term ``-B * sum_i S^z_i`` is a uniform field applied to all sites.
 Sweeping B at fixed (J, chi, beta) maps out the competition between exchange,
 chirality, and Zeeman energy, and is the main subject of the ``run_field_sweep``
 benchmark.
@@ -65,7 +65,6 @@ from qalma.meanfield.symmetry_breaking import symmetry_breaking_mfa
 from qalma.model import SystemDescriptor
 from qalma.operators.states import ProductDensityOperator
 from qalma.qutip_tools import is_empty_op
-
 
 # ---------------------------------------------------------------------------
 # Incremental JSONL output
@@ -190,7 +189,7 @@ def build_zeeman_term(system: SystemDescriptor) -> object:
 
     The caller multiplies by ``B`` and adds to the Hamiltonian:
 
-        ham_B = ham + B * zeeman
+        ham_B = ham - B * zeeman
 
     Parameters
     ----------
@@ -707,7 +706,7 @@ def compute_b_worker(
     """
     Compute the mean field and expectation values for a given value of B.
     """
-    ham_B = ham_0 + zeeman * B
+    ham_B = ham_0 - zeeman * B
 
     t0 = time.perf_counter()
     sigma = symmetry_breaking_mfa(
@@ -770,7 +769,7 @@ def run_field_sweep(
 
     The full Hamiltonian at each field point is
 
-        H(B) = H_chiral  +  B * sum_i S^z_i
+        H(B) = H_chiral  -  B * sum_i S^z_i
 
     For each value of B the variational state sigma is optimised and we record:
 
@@ -879,9 +878,9 @@ if __name__ == "__main__":
     output_dir = Path("benchmark_results")
     output_dir.mkdir(exist_ok=True)
 
-    out_exact    = output_dir / "exact_validation.jsonl"
+    out_exact = output_dir / "exact_validation.jsonl"
     out_numfields = output_dir / "numfields_convergence.jsonl"
-    out_sweep    = output_dir / "field_sweep.jsonl"
+    out_sweep = output_dir / "field_sweep.jsonl"
 
     all_results: dict = {
         "exact_validation": [],
@@ -995,7 +994,7 @@ if __name__ == "__main__":
 
     # ---- Results summary -------------------------------------------------
     # Incremental JSONL files were written after each block above.
-    print(f"\nResults saved incrementally:")
+    print("\nResults saved incrementally:")
     print(f"  {out_exact}")
     print(f"  {out_numfields}")
     print(f"  {out_sweep}")

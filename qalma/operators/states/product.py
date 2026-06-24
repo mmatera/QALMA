@@ -53,9 +53,9 @@ class ProductDensityOperator(DensityOperatorMixin, ProductOperator):
             Mapping from site name to local density matrix. If
             ``normalized=False``, each matrix is divided by its trace.
             Sites present in ``system`` but absent from ``local_states``
-            are filled with the maximally mixed state :math:`\\mathbb{I}/d`.
+            are filled with the maximally mixed state :math:`\mathbb{I}/d`.
         weight : float, optional
-            Non-negative scalar prefactor :math:`\\lambda`. Default is
+            Non-negative scalar prefactor :math:`\lambda`. Default is
             ``1.0``.
         system : SystemDescriptor or None, optional
             Descriptor of the full lattice system. If ``None``, the system
@@ -230,15 +230,15 @@ class ProductDensityOperator(DensityOperatorMixin, ProductOperator):
         return super().expect(obs_objs, _local_states=_local_states)
 
     def logm(self):
-        r"""Return the matrix logarithm :math:`\\log\\rho`.
+        r"""Return the matrix logarithm :math:`\log\rho`.
 
         Exploits the product structure: since
-        :math:`\\rho = \\lambda \\bigotimes_i \\rho_i`, we have
+        :math:`\rho = \lambda \bigotimes_i \rho_i`, we have
 
         .. math::
 
-            \\log\\rho = \\log\\lambda + \\sum_i \\log\\rho_i
-                       - \\sum_{j \\notin \\text{support}} \\log d_j\\, \\mathbb{I}
+            \log\rho = \log\lambda + \sum_i \log\rho_i
+                       - \sum_{j \notin \text{support}} \log d_j\, \mathbb{I}
 
         where the last sum accounts for identity factors from sites not in
         ``site_factors``.
@@ -316,7 +316,7 @@ class ProductDensityOperator(DensityOperatorMixin, ProductOperator):
         r"""Return the QuTiP tensor-product representation of the state.
 
         Sites in ``block`` that are not in ``site_factors`` contribute an
-        identity factor :math:`\\mathbb{I}/d`. If ``block`` is ``None``,
+        identity factor :math:`\mathbb{I}/d`. If ``block`` is ``None``,
         all system sites are used in lexicographical order.
 
         Parameters
@@ -329,7 +329,7 @@ class ProductDensityOperator(DensityOperatorMixin, ProductOperator):
         Returns
         -------
         qutip.Qobj or float
-            The density matrix :math:`\\lambda \\bigotimes_i \\rho_i` over
+            The density matrix :math:`\lambda \bigotimes_i \rho_i` over
             ``block``. Returns a scalar if the weight is zero or the system
             has no sites.
 

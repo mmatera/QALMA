@@ -24,6 +24,7 @@ extensions = [
     "sphinx.ext.mathjax",
     "nbsphinx",
     "myst_parser",
+    "sphinx.ext.imgconverter",  # Automatically handles image format conversions
 ]
 
 templates_path = ["_templates"]

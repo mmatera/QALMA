@@ -42,16 +42,16 @@ class ProductOperator(Operator):
 
     .. math::
 
-        \\lambda \\bigotimes_{i \\in S} O_i
+        \lambda \bigotimes_{i \in S} O_i
 
-    where :math:`\\lambda` is a scalar prefactor, :math:`S` is a subset of
+    where :math:`\lambda` is a scalar prefactor, :math:`S` is a subset of
     lattice sites, and each :math:`O_i` is a local operator acting on site
     :math:`i`. Sites not in :math:`S` are implicitly acted on by the identity.
 
     Attributes
     ----------
     prefactor : complex
-        Global scalar prefactor :math:`\\lambda`.
+        Global scalar prefactor :math:`\lambda`.
     site_factors : dict[str, np.ndarray]
         Mapping from site name to local operator matrix (numpy array).
     system : SystemDescriptor
@@ -197,7 +197,7 @@ class ProductOperator(Operator):
         Returns
         -------
         ProductOperator
-            The operator :math:`(\\lambda \\bigotimes O_i)^{\\text{exp}}`.
+            The operator :math:`(\lambda \bigotimes O_i)^{\text{exp}}`.
 
         """
         return ProductOperator(
@@ -257,7 +257,7 @@ class ProductOperator(Operator):
         Returns
         -------
         ProductOperator
-            The operator :math:`(\\lambda \\bigotimes O_i)^\\dagger`.
+            The operator :math:`(\lambda \bigotimes O_i)^\dagger`.
 
         """
         sites_op_dag = {key: op.T.conj() for key, op in self.site_factors.items()}
@@ -267,7 +267,7 @@ class ProductOperator(Operator):
         return ProductOperator(sites_op_dag, prefactor, self.system)
 
     def expm(self):
-        r"""Return the matrix exponential :math:`e^{\\lambda O}`.
+        r"""Return the matrix exponential :math:`e^{\lambda O}`.
 
         For single-site operators the exponential is computed exactly via
         ``scipy.linalg.expm``. For multi-site operators falls back to
@@ -394,8 +394,8 @@ class ProductOperator(Operator):
     def logm(self):
         r"""Return the matrix logarithm of the operator.
 
-        Uses the identity :math:`\\log(\\lambda \\bigotimes_i O_i) =
-        \\log\\lambda + \\sum_i \\log O_i` valid when the local factors
+        Uses the identity :math:`\log(\lambda \bigotimes_i O_i) =
+        \log\lambda + \sum_i \log O_i` valid when the local factors
         commute. Each local logarithm is computed via
         ``scipy.linalg.logm``.
 
@@ -715,15 +715,15 @@ class ProductOperator(Operator):
 class ScalarOperator(ProductOperator):
     r"""A product operator that acts as a scalar multiple of the identity.
 
-    Represents :math:`\\lambda \\, \\mathbb{I}` where :math:`\\lambda` is a
-    complex scalar and :math:`\\mathbb{I}` is the identity on the full system.
+    Represents :math:`\lambda \, \mathbb{I}` where :math:`\lambda` is a
+    complex scalar and :math:`\mathbb{I}` is the identity on the full system.
     This is a special case of :class:`ProductOperator` with no non-trivial
     site factors.
 
     Parameters
     ----------
     prefactor : complex
-        The scalar value :math:`\\lambda`.
+        The scalar value :math:`\lambda`.
     system : SystemDescriptor
         Descriptor of the full lattice system.
 
@@ -824,7 +824,7 @@ class ScalarOperator(ProductOperator):
         Returns
         -------
         ScalarOperator
-            A scalar operator with prefactor :math:`\\log(\\lambda)`.
+            A scalar operator with prefactor :math:`\ln(\lambda)`.
 
         """
         return ScalarOperator(np.log(self.prefactor), self.system)
@@ -842,7 +842,7 @@ class ScalarOperator(ProductOperator):
         Returns
         -------
         float
-            The norm :math:`|\\lambda| \\cdot \\|\\mathbb{I}\\|_{\\text{ord}}`.
+            The norm :math:`|\lambda| \cdot \|\mathbb{I}\|_{\text{ord}}`.
 
         """
         result = self.prefactor
@@ -919,7 +919,7 @@ class ScalarOperator(ProductOperator):
         Returns
         -------
         qutip.Qobj or complex
-            :math:`\\lambda \\, \\mathbb{I}_{\\text{block}}`. Returns the
+            :math:`\lambda \, \mathbb{I}_{\text{block}}`. Returns the
             bare scalar if ``block`` is an empty tuple.
 
         """

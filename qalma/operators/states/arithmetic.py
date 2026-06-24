@@ -73,8 +73,8 @@ class MixtureDensityOperator(DensityOperatorMixin, SumOperator):
     ) -> Union[np.ndarray, dict, complex]:
         r"""Compute expectation values as a weighted sum over the mixture components.
 
-        For each component :math:`\\rho_k` with weight :math:`\\lambda_k`,
-        computes :math:`\\langle O \\rangle = \\sum_k \\lambda_k \\langle O \\rangle_{\\rho_k}`.
+        For each component :math:`\rho_k` with weight :math:`\lambda_k`,
+        computes :math:`\langle O \rangle = \sum_k \lambda_k \langle O \rangle_{\rho_k}`.
 
         Parameters
         ----------

@@ -253,7 +253,7 @@ class Operator:  # pylint: disable=too-many-public-methods
         return self
 
     def hermitian_part(self):
-        r"""Return the Hermitian part of the operator, $(O + O^\dagger) / 2$."""
+        r"""Return the Hermitian part of the operator, $\frac{O + O^{\dagger}}{2}$."""
         if self.isherm:
             return self
         return (self + self.dag()) * 0.5

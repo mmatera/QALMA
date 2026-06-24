@@ -134,17 +134,17 @@ class QuadraticFormOperator(Operator):
         Parameters
         ----------
         basis : tuple[Operator, ...]
-            Tuple of Hermitian one-body operators :math:`Q_\\alpha`. Each
-            contributes a term :math:`w_\\alpha Q_\\alpha^2` to the operator.
+            Tuple of Hermitian one-body operators :math:`Q_\alpha`. Each
+            contributes a term :math:`w_\alpha Q_\alpha^2` to the operator.
         weights : tuple[complex, ...]
-            Scalar weights :math:`w_\\alpha`, one per basis element.
+            Scalar weights :math:`w_\alpha`, one per basis element.
         system : SystemDescriptor or None, optional
             Descriptor of the full lattice system. Inferred from ``basis``
             if not provided.
         linear_term : OneBodyOperator, LocalOperator, ScalarOperator, or None, optional
             The one-body part :math:`L` of the operator. Default is ``None``.
         offset : Operator or None, optional
-            Additional remainder term :math:`\\delta Q` not captured by the
+            Additional remainder term :math:`\delta Q` not captured by the
             quadratic or linear parts. Default is ``None``.
 
         """
@@ -361,7 +361,7 @@ class QuadraticFormOperator(Operator):
         return result
 
     def dag(self):
-        r"""Return the adjoint :math:`O^\\dagger`.
+        r"""Return the adjoint :math:`O^{\dagger}`.
 
         Conjugates the weights and takes the adjoint of the linear term
         and offset. The basis elements are assumed Hermitian so they are
@@ -489,7 +489,7 @@ class QuadraticFormOperator(Operator):
         r"""Compute the partial trace over the complement of ``sites``.
 
         Traces out the linear term and offset analytically. For the
-        quadratic terms :math:`w_\\alpha Q_\\alpha^2`, expands each as a
+        quadratic terms :math:`w_\alpha Q_\alpha^2`, expands each as a
         product and takes the partial trace term by term.
 
         Parameters

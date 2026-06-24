@@ -43,6 +43,33 @@ from qalma.model import SystemDescriptor
 from qalma.operators.states import ProductDensityOperator
 
 # ---------------------------------------------------------------------------
+# Incremental JSONL output
+# ---------------------------------------------------------------------------
+
+
+def _append_jsonl(path, records):
+    """Append *records* to a JSON Lines file, one record per line.
+
+    The file is created if it does not exist.  Each call flushes and syncs
+    to disk so that partial results survive a crash or keyboard interrupt.
+
+    Parameters
+    ----------
+    path : Path
+        Destination ``.jsonl`` file.
+    records : dict or list of dict
+        One record or a sequence of records to append.
+    """
+    if isinstance(records, dict):
+        records = [records]
+    with open(path, "a") as fh:
+        for rec in records:
+            fh.write(json.dumps(rec) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+
+
+# ---------------------------------------------------------------------------
 # System builders
 # ---------------------------------------------------------------------------
 
@@ -157,7 +184,7 @@ def t_score(sigma, ham, beta, f_exact: Optional[float]):
     if f_exact is None:
         return None
     betaf_exact = beta * f_exact  # log Tr[e^{-beta*H}]
-    return float(compute_t_score(sigma, ham * beta, betaf_exact)[0])
+    return float(np.real(compute_t_score(sigma, ham * beta, betaf_exact)[0]))
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +377,44 @@ def _var_f(sigma, ham, beta: float) -> float:
     return compute_variance(sigma, ham * beta)
 
 
+def worker_numfield_sweep(nf, system, ham, beta, var_f_sc, sigma_ref, J2_ratio):
+    """Worker that does single evaluation for numfield sweep"""
+    t0 = time.perf_counter()
+    Sz_ops = [system.site_operator("Sz", s) for s in system.sites]
+    sigma = variational_quadratic_mfa(
+        beta * ham,
+        numfields=nf,
+        sigma_ref=sigma_ref,
+        max_self_consistent_steps=30,
+    )
+    elapsed = time.perf_counter() - t0
+
+    f_mf = mf_free_energy(sigma, ham, beta)
+    var_f = _var_f(sigma, ham, beta)
+    var_f_ratio = var_f / var_f_sc if var_f_sc > 1e-15 else None
+    mag = [float(np.real(sigma.expect(sz))) for sz in Sz_ops]
+
+    ratio_str = f"{var_f_ratio:.4f}" if var_f_ratio is not None else "  n/a"
+    print(
+        f"  J2/J1={J2_ratio:.2f}  L={L}  beta={beta}  "
+        f"nf={nf:2d}:  F_mf={f_mf:.6f}  Var={var_f:.4g}  "
+        f"Var_ratio={ratio_str}  t={elapsed:.2f}s  "
+        f"<Sz>=[{', '.join(f'{m:.3f}' for m in mag[:5])}...]"
+    )
+
+    return {
+        "J2_over_J1": J2_ratio,
+        "L": L,
+        "beta": beta,
+        "numfields": nf,
+        "f": f_mf,
+        "var_f": var_f,
+        "var_f_ratio": var_f_ratio,
+        "magnetization": mag,
+        "time": elapsed,
+    }
+
+
 def run_numfields_sweep(
     J2_ratio: float,
     L: int,
@@ -378,10 +443,10 @@ def run_numfields_sweep(
 
     Returns list of result dicts suitable for JSON serialization.
     """
+    import concurrent.futures
+
     J2 = J2_ratio * abs(J1)
     system, ham = build_j1j2_chain(L, J1, J2)
-    sites = list(system.sites.keys())
-    Sz_ops = [system.site_operator("Sz", s) for s in sites]
 
     # --- Self-consistent baseline (nf=0) -----------------------------------
     t0 = time.perf_counter()
@@ -402,44 +467,28 @@ def run_numfields_sweep(
     results = []
     sigma_ref = sigma_sc  # warm start from SC solution
 
-    for nf in sorted(numfields_list):
-        t0 = time.perf_counter()
-        sigma = variational_quadratic_mfa(
-            beta * ham,
-            numfields=nf,
-            sigma_ref=sigma_ref,
-            max_self_consistent_steps=30,
-        )
-        elapsed = time.perf_counter() - t0
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        future_to_nf = {
+            executor.submit(
+                worker_numfield_sweep,
+                nf,
+                system,
+                ham,
+                beta,
+                var_f_sc,
+                sigma_ref,
+                J2_ratio,
+            ): nf
+            for nf in numfields_list
+        }
 
-        f_mf = mf_free_energy(sigma, ham, beta)
-        var_f = _var_f(sigma, ham, beta)
-        var_f_ratio = var_f / var_f_sc if var_f_sc > 1e-15 else None
-        mag = [float(np.real(sigma.expect(sz))) for sz in Sz_ops]
-
-        results.append(
-            {
-                "J2_over_J1": J2_ratio,
-                "L": L,
-                "beta": beta,
-                "numfields": nf,
-                "f": f_mf,
-                "var_f": var_f,
-                "var_f_ratio": var_f_ratio,
-                "magnetization": mag,
-                "time": elapsed,
-            }
-        )
-
-        ratio_str = f"{var_f_ratio:.4f}" if var_f_ratio is not None else "  n/a"
-        print(
-            f"  J2/J1={J2_ratio:.2f}  L={L}  beta={beta}  "
-            f"nf={nf:2d}:  F_mf={f_mf:.6f}  Var={var_f:.4g}  "
-            f"Var_ratio={ratio_str}  t={elapsed:.2f}s  "
-            f"<Sz>=[{', '.join(f'{m:.3f}' for m in mag[:5])}...]"
-        )
-
-        sigma_ref = sigma  # warm start for next nf
+        for future in concurrent.futures.as_completed(future_to_nf):
+            nf_val = future_to_nf[future]
+            try:
+                result = future.result()
+                results.append(result)
+            except Exception as exc:
+                print(f"nf_val={nf_val} generated an exception: {exc}")
 
     return results
 
@@ -474,6 +523,10 @@ def test_numfields_convergence(J2_ratio, label, L, beta):
 if __name__ == "__main__":
     output_dir = Path("benchmark_results")
     output_dir.mkdir(exist_ok=True)
+
+    out_exact = output_dir / "exact_validation_2body.jsonl"
+    out_numfields = output_dir / "numfields_convergence_2body.jsonl"
+
     all_results = {"exact_validation": [], "numfields_convergence": []}
 
     # ---- Family 1 --------------------------------------------------------
@@ -521,6 +574,7 @@ if __name__ == "__main__":
                     "time_sc": t_sc,
                 }
                 all_results["exact_validation"].append(row)
+                _append_jsonl(out_exact, row)
 
                 print(
                     f"  F [beta units]: mixed={row['F_mixed']:.4f}  "
@@ -542,14 +596,15 @@ if __name__ == "__main__":
                 try:
                     rows = run_numfields_sweep(J2_ratio, L, beta)
                     all_results["numfields_convergence"].extend(rows)
+                    _append_jsonl(out_numfields, rows)
                 except Exception as exc:
                     print(f"  FAILED: {exc}")
 
-    # ---- Save ------------------------------------------------------------
-    out = output_dir / "variational_mf_paper_results.json"
-    with open(out, "w") as f:
-        json.dump(all_results, f, indent=2)
-    print(f"\nResults saved → {out}")
+    # ---- Results summary -------------------------------------------------
+    # Incremental JSONL files were written after each block above.
+    print("\nResults saved incrementally:")
+    print(f"  {out_exact}")
+    print(f"  {out_numfields}")
 
     # ---- Summary table ---------------------------------------------------
     print("\n--- Convergence summary (L=8, beta=2.0) ---")

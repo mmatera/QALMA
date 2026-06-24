@@ -722,7 +722,7 @@ def decompose_qutip_operator(
 
     Decomposes ``operator`` acting on :math:`H_1 \otimes H_2 \otimes \cdots`
     into a list of tuples ``(q1, q2, ...)`` such that
-    ``operator ≈ Σ_k q1^k ⊗ q2^k ⊗ …``.
+    ``operator \approx \Sigma_k q_1^k \otimes q_2^k \otimes \ldots``.
 
     Parameters
     ----------

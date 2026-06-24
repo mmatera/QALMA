@@ -15,7 +15,6 @@ dynamics using MaxEnt projected evolution.
    :caption: Get Started
 
    what-is-qalma
-   installing
    quickstart
 
 .. toctree::

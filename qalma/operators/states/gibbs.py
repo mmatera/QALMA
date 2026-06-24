@@ -2,7 +2,7 @@ r"""Classes to represent density operators as Gibbs states.
 
 .. math::
 
-    \\rho = \\frac{e^{-K}}{\\mathrm{Tr}(e^{-K})}
+    \rho = \frac{e^{-K}}{\mathrm{Tr}(e^{-K})}
 
 """
 
@@ -32,7 +32,7 @@ __all__ = ["GibbsDensityOperator", "GibbsProductDensityOperator"]
 
 
 class GibbsDensityOperator(DensityOperatorMixin, Operator):
-    r"""Density operator of the form :math:`\\rho = \\lambda\\, e^{-K} / \\mathrm{Tr}(e^{-K})`.
+    r"""Density operator of the form :math:`\rho = \lambda\, e^{-K} / \mathrm{Tr}(e^{-K})`.
 
     Stores the operator implicitly through its generator :math:`K` rather
     than as an explicit matrix, enabling efficient representation of
@@ -44,14 +44,14 @@ class GibbsDensityOperator(DensityOperatorMixin, Operator):
     ----------
     k : Operator
         The generator operator :math:`K`. The Gibbs state is
-        :math:`\\rho \\propto e^{-K}`.
+        :math:`\rho \propto e^{-K}`.
     system : SystemDescriptor or None, optional
         Descriptor of the full lattice system. Defaults to ``k.system``.
     prefactor : float, optional
-        Positive scalar weight :math:`\\lambda`. Default is ``1.0``.
+        Positive scalar weight :math:`\lambda`. Default is ``1.0``.
     normalized : bool, optional
         If ``True``, assumes :math:`K` is already normalized so that
-        :math:`\\mathrm{Tr}(e^{-K}) = 1`. Default is ``False``.
+        :math:`\mathrm{Tr}(e^{-K}) = 1`. Default is ``False``.
     meanfield : Operator or None, optional
         Pre-computed mean-field approximation. Used internally to cache
         the mean-field state and avoid redundant computation.
@@ -64,7 +64,7 @@ class GibbsDensityOperator(DensityOperatorMixin, Operator):
     k : Operator
         The generator :math:`K`. May be shifted during normalization.
     prefactor : complex
-        Scalar weight :math:`\\lambda`.
+        Scalar weight :math:`\lambda`.
     normalized : bool
         Whether the generator has been normalized.
 
@@ -163,7 +163,7 @@ class GibbsDensityOperator(DensityOperatorMixin, Operator):
 
     @property
     def free_energy(self):
-        r"""Free energy :math:`F = -\\log Z` where :math:`Z = \\mathrm{Tr}(e^{-K})`.
+        r"""Free energy :math:`F = -\log Z` where :math:`Z = \mathrm{Tr}(e^{-K})`.
 
         Triggers normalization on first access if not yet normalized.
 
@@ -190,9 +190,9 @@ class GibbsDensityOperator(DensityOperatorMixin, Operator):
         self._free_energy = value
 
     def logm(self) -> Operator:
-        r"""Return the matrix logarithm :math:`\\log\\rho = -K`.
+        r"""Return the matrix logarithm :math:`\log\rho = -K`.
 
-        Normalizes the operator first to ensure :math:`\\mathrm{Tr}(e^{-K})=1`.
+        Normalizes the operator first to ensure :math:`\mathrm{Tr}(e^{-K})=1`.
 
         Returns
         -------
@@ -234,10 +234,10 @@ class GibbsDensityOperator(DensityOperatorMixin, Operator):
         return float(np.real(cast(complex, self.expect(ham - self.k))))
 
     def normalize(self) -> Operator:
-        r"""Normalize :math:`K` so that :math:`\\mathrm{Tr}(e^{-K}) = 1`.
+        r"""Normalize :math:`K` so that :math:`\mathrm{Tr}(e^{-K}) = 1`.
 
-        The normalization shifts :math:`K` by :math:`\\log Z` and stores
-        :math:`F = -\\log Z` as the free energy. This is a no-op if the
+        The normalization shifts :math:`K` by :math:`\log Z` and stores
+        :math:`F = -\log Z` as the free energy. This is a no-op if the
         operator is already normalized.
 
         Returns
@@ -372,13 +372,13 @@ class GibbsDensityOperator(DensityOperatorMixin, Operator):
 
 
 class GibbsProductDensityOperator(DensityOperatorMixin, Operator):
-    r"""Product Gibbs state :math:`\\rho = \\lambda \\bigotimes_i \\rho_i`.
+    r"""Product Gibbs state :math:`\rho = \lambda \bigotimes_i \rho_i`.
 
     Represents a density operator that factorizes over sites:
 
     .. math::
 
-        \\rho = \\lambda \\bigotimes_i \\frac{e^{-K_i}}{\\mathrm{Tr}(e^{-K_i})}
+        \rho = \lambda \bigotimes_i \frac{e^{-K_i}}{\mathrm{Tr}(e^{-K_i})}
 
     where each :math:`K_i` is a local operator on site :math:`i`. This is
     the mean-field (product state) approximation to a full Gibbs state.
@@ -393,7 +393,7 @@ class GibbsProductDensityOperator(DensityOperatorMixin, Operator):
         Descriptor of the full lattice system. Required when ``k`` is a
         dict. Defaults to ``k.system`` when ``k`` is an :class:`Operator`.
     prefactor : complex, optional
-        Positive real scalar weight :math:`\\lambda`. Default is ``1``.
+        Positive real scalar weight :math:`\lambda`. Default is ``1``.
     normalized : bool, optional
         If ``True``, assumes each local :math:`K_i` is already normalized.
         Default is ``False``.
@@ -402,11 +402,11 @@ class GibbsProductDensityOperator(DensityOperatorMixin, Operator):
     ----------
     k_by_site : dict[str, Qobj]
         Local generators :math:`K_i` stored as :class:`qutip.Qobj`, one
-        per site, normalized so that :math:`\\mathrm{Tr}(e^{-K_i}) = 1`.
+        per site, normalized so that :math:`\mathrm{Tr}(e^{-K_i}) = 1`.
     prefactor : complex
-        Scalar weight :math:`\\lambda`.
+        Scalar weight :math:`\lambda`.
     free_energies : dict[str, float]
-        Local free energies :math:`F_i = -\\log Z_i` for each site.
+        Local free energies :math:`F_i = -\log Z_i` for each site.
     isherm : bool
         Always ``True`` — Gibbs states are Hermitian by construction.
 
@@ -501,7 +501,7 @@ class GibbsProductDensityOperator(DensityOperatorMixin, Operator):
         obs_objs: Union[Operator, Iterable],
         _local_states: Optional[Dict[frozenset, DensityOperatorProtocol]] = None,
     ) -> Union[np.ndarray, dict, complex]:
-        r"""Compute the expectation value :math:`\\langle O \\rangle_\\rho`.
+        r"""Compute the expectation value :math:`\langle O \rangle_\rho`.
 
         Delegates to the :class:`ProductDensityOperator` representation,
         which computes expectation values efficiently using the product
@@ -540,15 +540,15 @@ class GibbsProductDensityOperator(DensityOperatorMixin, Operator):
         return True
 
     def logm(self) -> Operator:
-        r"""Return the matrix logarithm :math:`\\log\\rho = -\\sum_i K_i`.
+        r"""Return the matrix logarithm :math:`\log\rho = -\sum_i K_i`.
 
-        Exploits the product structure: since :math:`\\rho = \\bigotimes_i
-        e^{-K_i}`, we have :math:`\\log\\rho = -\\sum_i K_i`.
+        Exploits the product structure: since :math:`\rho = \bigotimes_i
+        e^{-K_i}`, we have :math:`\log\rho = -\sum_i K_i`.
 
         Returns
         -------
         OneBodyOperator
-            The sum :math:`-\\sum_i K_i` as a one-body operator.
+            The sum :math:`-\sum_i K_i` as a one-body operator.
 
         """
         terms = tuple(
@@ -617,7 +617,7 @@ class GibbsProductDensityOperator(DensityOperatorMixin, Operator):
     def to_product_state(self):
         r"""Convert to an explicit :class:`ProductDensityOperator`.
 
-        Computes each local density matrix :math:`\\rho_i = e^{-K_i}` and
+        Computes each local density matrix :math:`\rho_i = e^{-K_i}` and
         assembles them into a :class:`ProductDensityOperator`.
 
         Returns
@@ -652,7 +652,7 @@ class GibbsProductDensityOperator(DensityOperatorMixin, Operator):
         Returns
         -------
         qutip.Qobj
-            The full density matrix :math:`\\bigotimes_i \\rho_i` over
+            The full density matrix :math:`\bigotimes_i \rho_i` over
             ``block``.
 
         """

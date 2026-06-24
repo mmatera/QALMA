@@ -50,7 +50,7 @@ Basic usage
    f_var = compute_free_energy(sigma_var, beta * ham)
 
    print(f"F_sc  = {f_sc:.6f}")   # upper bound on F_exact
-   print(f"F_var = {f_var:.6f}")  # tighter upper bound (≤ F_sc)
+   print(f"F_var = {f_var:.6f}")  # tighter upper bound ($\leq$ F_sc)
 
 The variational free energy is non-increasing in ``numfields``: more
 auxiliary fields give a tighter upper bound on the exact free energy.

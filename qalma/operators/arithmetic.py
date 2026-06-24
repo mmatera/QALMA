@@ -29,7 +29,7 @@ class SumOperator(Operator):
 
     .. math::
 
-        O = \\sum_k O_k
+        O = \sum_k O_k
 
     where each term :math:`O_k` is an arbitrary :class:`Operator`. Terms may
     act on overlapping or disjoint subsets of sites.
@@ -115,7 +115,7 @@ class SumOperator(Operator):
         Returns
         -------
         Operator
-            The operator :math:`O^{\\text{exp}}`. Returns the scalar ``1``
+            The operator :math:`O^{\text{exp}}`. Returns the scalar ``1``
             for ``exp == 0``.
 
         Raises
@@ -208,7 +208,7 @@ class SumOperator(Operator):
         return frozenset(result)
 
     def dag(self):
-        r"""Return the adjoint operator :math:`O^\\dagger`.
+        r"""Return the adjoint operator :math:`O^{\dagger}`.
 
         Returns
         -------
@@ -257,7 +257,7 @@ class SumOperator(Operator):
         return self
 
     def hermitian_part(self):
-        r"""Return the Hermitian part :math:`(O + O^\\dagger)/2`.
+        r"""Return the Hermitian part :math:`\frac{O + O^{\dagger}}{2}`.
 
         Returns
         -------
@@ -541,10 +541,10 @@ class OneBodyOperator(SumOperator):
 
     .. math::
 
-        O = \\lambda_0 \\mathbb{I} + \\sum_i O_i
+        O = \lambda_0 \mathbb{I} + \sum_i O_i
 
     where each :math:`O_i` is a :class:`LocalOperator` acting on site
-    :math:`i` and :math:`\\lambda_0` is an optional scalar term.
+    :math:`i` and :math:`\lambda_0` is an optional scalar term.
 
     During construction, terms are automatically simplified and grouped by
     site: multiple local operators on the same site are added together into
@@ -623,7 +623,7 @@ class OneBodyOperator(SumOperator):
         return OneBodyOperator(tuple(-term for term in self.terms), self.system)
 
     def dag(self):
-        r"""Return the adjoint :math:`O^\\dagger`.
+        r"""Return the adjoint :math:`O^{\dagger}`.
 
         Returns
         -------
@@ -644,7 +644,7 @@ class OneBodyOperator(SumOperator):
 
         .. math::
 
-            e^{\\lambda_0 + \\sum_i O_i} = e^{\\lambda_0} \\bigotimes_i e^{O_i}
+            e^{\lambda_0 + \sum_i O_i} = e^{\lambda_0} \bigotimes_i e^{O_i}
 
         Each local exponential is computed via ``scipy.linalg.expm``.
         The diagonal of each local operator is shifted to avoid numerical

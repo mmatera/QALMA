@@ -46,7 +46,7 @@ class QutipDensityOperator(DensityOperatorMixin, QutipOperator):
         names : dict[str, int] or None, optional
             Mapping from site name to tensor-product index in ``qoperator``.
         prefactor : float, optional
-            Scalar weight :math:`\\lambda`. Default is ``1``.
+            Scalar weight :math:`\lambda`. Default is ``1``.
         normalized : bool, optional
             If ``True``, skips normalization on construction. Default is
             ``False``.
@@ -114,7 +114,7 @@ class QutipDensityOperator(DensityOperatorMixin, QutipOperator):
 
     def logm(self):
         r"""
-        Return the matrix logarithm :math:`\\log\\rho`.
+        Return the matrix logarithm :math:`\ln \rho`.
 
         Normalizes first, then computes the logarithm via eigendecomposition.
         Eigenvalues below ``1e-30`` are clamped to avoid divergence.
