@@ -14,11 +14,15 @@ corresponding dimensions as values.
 ``build_spin_chain`` is a short-cut to build a spin chain lattice.
 """
 
+import itertools
 import logging
 import pickle
 import re
 import warnings
 from typing import Dict, Optional, Tuple
+
+import numpy as np
+import qutip  # type: ignore[import-untyped]
 
 from qalma.alpsmodels import ModelDescriptor, qutip_model_from_dims
 from qalma.geometry import GraphDescriptor
@@ -31,12 +35,107 @@ logger = logging.getLogger(__name__)
 class FermionicSignWarning(UserWarning):
     """Warn that a model with fermionic operators is treated as bosonic.
 
-    Operators acting on different sites are always assumed to commute:
-    the signs coming from the anticommutation of fermionic operators are
-    not implemented. Results for fermionic models are only correct when
+    When every site of the system is a single fermionic mode (a two-level
+    site with a fermionic quantum number), the operators are built through
+    the Jordan-Wigner transformation and the signs are exact. Otherwise
+    (e.g. sites with two spin species, or models that mix fermionic and
+    non-fermionic sites), operators acting on different sites are assumed
+    to commute: the signs coming from the anticommutation of fermionic
+    operators are not implemented. Results are then only correct when
     those signs cancel out (e.g. nearest-neighbour hopping of a single
     species on an open chain).
     """
+
+
+def _binary_quantum_numbers(site_basis: dict) -> Optional[list]:
+    """Split a local basis into two-level factors, one per quantum number.
+
+    Returns a list of ``(qn_name, position, lower_value, fermionic)``, in
+    the order of the quantum numbers, if the local basis is the full tensor
+    product of quantum numbers that take two consecutive values. Quantum
+    numbers that are functions of the chosen ones (e.g. ``N = Nup + Ndown``,
+    or a fixed ``S``) are ignored. Returns ``None`` otherwise, e.g. for
+    spin-1 sites or for the constrained t-J basis.
+    """
+    qns = site_basis.get("qn", None)
+    qn_index = site_basis.get("qn_index", None)
+    states = site_basis.get("localstates", None)
+    if not qns or qn_index is None or not states:
+        return None
+    binary: list = []
+    distinct = {()}
+    for qn_name, position in sorted(qn_index.items(), key=lambda item: item[1]):
+        values = sorted({state[position] for state in states})
+        if len(values) != 2 or abs(values[1] - values[0] - 1) > 1e-10:
+            continue
+        lower = values[0]
+        candidate = binary + [(qn_name, position, lower)]
+        new_distinct = {
+            tuple(int(round(state[pos] - low)) for _, pos, low in candidate)
+            for state in states
+        }
+        if len(new_distinct) == len(distinct):
+            # a function of the quantum numbers already chosen
+            continue
+        binary, distinct = candidate, new_distinct
+    if not binary or len(states) != 2 ** len(binary) or len(distinct) != len(states):
+        return None
+    return [
+        (qn_name, position, lower, bool(qns.get(qn_name, {}).get("fermionic", False)))
+        for qn_name, position, lower in binary
+    ]
+
+
+def _qubit_layout(physical_sites: dict, qubit_split: Optional[bool]) -> Optional[dict]:
+    """Decide whether the system is represented by qubits, and how.
+
+    Returns ``None`` if the sites keep their own local spaces. Otherwise
+    returns a mapping ``node -> [(qubit_name, qn_name, position, lower,
+    fermionic), ...]``. With ``qubit_split=None`` the qubit representation
+    is used when the model has fermionic quantum numbers and every site
+    factorizes into two-level quantum numbers.
+    """
+    if qubit_split is False or not physical_sites:
+        return None
+    layout = {}
+    has_fermions = False
+    for node, site_basis in physical_sites.items():
+        binary = _binary_quantum_numbers(site_basis)
+        if binary is None:
+            if qubit_split:
+                raise ValueError(
+                    f"the local space of site {node} is not a product of two-level "
+                    "quantum numbers, and cannot be split into qubits."
+                )
+            return None
+        single = len(binary) == 1
+        layout[node] = [
+            (node if single else f"{node}:{qn_name}", qn_name, position, lower, fermionic)
+            for qn_name, position, lower, fermionic in binary
+        ]
+        has_fermions = has_fermions or any(entry[3] for entry in binary)
+    if qubit_split is None and not has_fermions:
+        return None
+    return layout
+
+
+def _qubit_site_basis(node, qn_name, lower, fermionic, parent_basis) -> dict:
+    """Local basis descriptor of one qubit of a split site."""
+    identity = qutip.qeye(2)
+    return {
+        "name": f"{parent_basis.get('name', '')}:{qn_name}",
+        "qn": {qn_name: {"min": lower, "max": lower + 1, "fermionic": fermionic}},
+        "qn_index": {qn_name: 0},
+        "dimension": 2,
+        "identity": identity,
+        "operators": {"identity": identity},
+        "parms": parent_basis.get("parms", {}),
+        "localstates": [(lower,), (lower + 1,)],
+        "parent": node,
+        "fermionic": fermionic,
+        # parity of the first basis state, (-1)**lower, for fermionic qubits
+        "parity0": (-1.0) ** (int(round(lower)) % 2) if fermionic else 1.0,
+    }
 
 
 class SystemDescriptor:
@@ -61,7 +160,25 @@ class SystemDescriptor:
         parms: Optional[dict] = None,
         sites=None,
         _load_operators=True,
+        qubit_split: Optional[bool] = None,
     ):
+        """Build a system from a graph and a model.
+
+        Parameters
+        ----------
+        graph, model, parms :
+            Geometry, model and parameters.
+        sites : dict, optional
+            Local spaces, overriding the ones derived from ``graph`` (used
+            internally by ``union`` and ``subsystem``).
+        qubit_split : bool or None
+            Whether to represent each site by one qubit per two-level
+            quantum number, with fermionic modes mapped to Pauli strings
+            through the Jordan-Wigner transformation. ``None`` (default)
+            does it when the model has fermionic quantum numbers and every
+            site can be split; ``True`` forces it (raising ``ValueError`` if
+            some site cannot be split); ``False`` disables it.
+        """
         if parms is None:
             parms = {}
         if model:
@@ -72,20 +189,48 @@ class SystemDescriptor:
         self.spec = {"graph": graph, "model": model, "parms": parms}
         self.name = f"{self.spec['model'].name} on {self.spec['graph'].name}"
         site_basis = model.site_basis
-        if sites:
-            self.sites = sites
-        else:
-            try:
-                self.sites = {
-                    node: site_basis[attr["type"]] for node, attr in graph.nodes.items()
-                }
-            except KeyError as ex:
+        try:
+            physical_sites = {
+                node: site_basis[attr["type"]] for node, attr in graph.nodes.items()
+            }
+        except KeyError as ex:
+            if not sites:
                 raise ValueError(
                     (
                         f"Model <<{model.name}>> does not provide the specification "
                         f"for site of type <<{ex.args[0]}>> used in nodes of <<{graph.name}>>."
                     )
                 ) from ex
+            physical_sites = {}
+        given_qubits = bool(sites) and all("parent" in s for s in sites.values())
+        if sites and not given_qubits:
+            physical_sites = sites
+        self.qubit_split = qubit_split
+        self.physical_sites = physical_sites
+        layout = _qubit_layout(physical_sites, qubit_split)
+        # With the qubit representation, every two-level quantum number of
+        # every site becomes a qubit, ordered as the nodes and, inside each
+        # node, as the quantum numbers. Fermionic modes are mapped to Pauli
+        # strings through the Jordan-Wigner transformation in that order.
+        self.qubit_representation = layout is not None
+        if layout is None:
+            self.sites = sites if sites else physical_sites
+            self.site_qubits = {node: (node,) for node in self.sites}
+        else:
+            qubit_sites = {
+                name: _qubit_site_basis(node, qn_name, lower, fermionic, physical_sites[node])
+                for node, entries in layout.items()
+                for name, qn_name, _, lower, fermionic in entries
+            }
+            self.sites = sites if given_qubits else qubit_sites
+            site_qubits = {
+                node: tuple(entry[0] for entry in entries if entry[0] in self.sites)
+                for node, entries in layout.items()
+            }
+            self.site_qubits = {node: qs for node, qs in site_qubits.items() if qs}
+        self.qubit_parent = {
+            qubit: node for node, qubits in self.site_qubits.items() for qubit in qubits
+        }
 
         self.dimensions = {name: site["dimension"] for name, site in self.sites.items()}
         self.operators = {
@@ -95,10 +240,11 @@ class SystemDescriptor:
             "global_operators": {},
         }
         self._subsystems_cache = {}
+        self._jw_strings = None
         if _load_operators:
-            if any(
+            if not self.qubit_representation and any(
                 getattr(op, "fermionic", False)
-                for site in self.sites.values()
+                for site in self.physical_sites.values()
                 for op in site.get("operators", {}).values()
             ):
                 warnings.warn(
@@ -169,6 +315,15 @@ class SystemDescriptor:
     def __setstate__(self, state):
         """Set state."""
         state_dict = pickle.loads(state)
+        # Files written before the qubit representation was introduced.
+        if "physical_sites" not in state_dict:
+            sites = state_dict.get("sites", {})
+            state_dict["physical_sites"] = sites
+            state_dict["site_qubits"] = {node: (node,) for node in sites}
+            state_dict["qubit_parent"] = {node: node for node in sites}
+            state_dict["qubit_representation"] = False
+            state_dict["qubit_split"] = False
+        state_dict["_jw_strings"] = None
         state_dict["operators"] = {
             "site_operators": {},
             "bond_operators": {},
@@ -195,12 +350,31 @@ class SystemDescriptor:
         # Build a new subsystem
         parms = self.spec["parms"].copy()
         model = self.spec["model"]
+        if self.qubit_representation:
+            # ``sites`` are qubits: keep the nodes they belong to, and the
+            # qubits in the same order as in ``self``.
+            qubit_parent = self.qubit_parent
+            graph = self.spec["graph"].subgraph(
+                frozenset(qubit_parent[qubit] for qubit in sites)
+            )
+            qubits = {q: basis for q, basis in self_sites.items() if q in sites}
+            result = SystemDescriptor(
+                graph,
+                model,
+                parms,
+                sites=qubits,
+                _load_operators=False,
+                qubit_split=self.qubit_split,
+            )
+            return self._subsystems_cache.setdefault(sites, result)
         graph = self.spec["graph"].subgraph(sites)
-        result = SystemDescriptor(graph, model, parms, _load_operators=False)
+        result = SystemDescriptor(
+            graph, model, parms, _load_operators=False, qubit_split=self.qubit_split
+        )
         return self._subsystems_cache.setdefault(sites, result)
 
     def _load_site_operators(self):
-        for site_name, site in self.sites.items():
+        for site_name, site in self.physical_sites.items():
             for op_name in site["operators"]:
                 op_site = f"{op_name}@{site_name}"
                 self.site_operator(op_site)
@@ -212,6 +386,21 @@ class SystemDescriptor:
 
         # First, load conserved quantum numbers:
         for constraint_qn in self.spec["model"].constraints:
+            if self.qubit_representation:
+                # pylint: disable=import-outside-toplevel
+                from qalma.operators import SumOperator
+                from qalma.operators.pauli import to_pauli_sum
+
+                local_terms = tuple(
+                    self.site_operator(site_basis["qn"][constraint_qn]["operator"], node)
+                    for node, site_basis in self.physical_sites.items()
+                    if constraint_qn in site_basis["qn"]
+                )
+                if local_terms:
+                    global_qn = to_pauli_sum(SumOperator(local_terms, self))
+                    if bool(global_qn):
+                        self.operators["global_operators"][constraint_qn] = global_qn
+                continue
             global_qn_terms = []
             for site, site_basis in self.sites.items():
                 local_qn = site_basis["qn"].get(constraint_qn, None)
@@ -293,7 +482,9 @@ class SystemDescriptor:
         sites = self.sites.copy()
         sites.update(system.sites)
         # raise NotImplementedError("Union of disjoint systems are not implemented.")
-        result = SystemDescriptor(union_graph, model, parms, sites)
+        result = SystemDescriptor(
+            union_graph, model, parms, sites, qubit_split=self.qubit_split
+        )
         result._subsystems_cache[frozenset(self.sites)] = self
         result._subsystems_cache[frozenset(system.sites)] = system
 
@@ -327,17 +518,139 @@ class SystemDescriptor:
         else:
             op_name, site = name.split("@")
 
-        site_op = self.operators["site_operators"].get(site, {}).get(name, None)
+        site_op = self.operators["site_operators"].get(site, {}).get(op_name, None)
         if site_op is not None:
             return site_op
 
-        local_op = self.sites[site]["operators"].get(op_name, None)
+        local_op = self.physical_sites[site]["operators"].get(op_name, None)
         if local_op is None:
             return None
-        result_op = LocalOperator(site, local_op, system=self)
+        if self.qubit_representation:
+            result_op = self.jordan_wigner_operator(site, local_op)
+        else:
+            result_op = LocalOperator(site, local_op, system=self)
         self.operators["site_operators"].setdefault(site, {})
         self.operators["site_operators"][site][op_name] = result_op
         return result_op
+
+    @property
+    def jordan_wigner(self) -> bool:
+        """``True`` if the fermionic modes are mapped to Pauli strings.
+
+        That is, if the system uses the qubit representation and some qubit
+        is a fermionic mode.
+        """
+        return self.qubit_representation and any(
+            basis.get("fermionic", False) for basis in self.sites.values()
+        )
+
+    def jordan_wigner_string(self, qubit: str):
+        r"""Return :math:`\prod_{q' < q} (-1)^{N_{q'}}` as a Pauli string.
+
+        The product runs over the fermionic qubits that come before
+        ``qubit`` in ``self.sites``. Only available when
+        ``self.qubit_representation`` is ``True``.
+        """
+        # pylint: disable=import-outside-toplevel
+        from qalma.operators.pauli import PauliStringOperator
+
+        code, sign = self._jordan_wigner_strings()[qubit]
+        return PauliStringOperator(code, sign, self)
+
+    def _jordan_wigner_strings(self) -> dict:
+        """Map each qubit to ``(code, sign)`` of its Jordan-Wigner string."""
+        if self._jw_strings is not None:
+            return self._jw_strings
+        assert self.qubit_representation, "the system is not represented by qubits."
+        result = {}
+        code, sign = 0, 1.0
+        for position, (qubit, basis) in enumerate(self.sites.items()):
+            result[qubit] = (code, sign)
+            if basis.get("fermionic", False):
+                # (-1)^N = parity0 * sigma_z
+                code |= 3 << (2 * position)
+                sign *= basis["parity0"]
+        self._jw_strings = result
+        return result
+
+    def jordan_wigner_operator(self, site: str, local_op):
+        r"""Map an operator on the node ``site`` to a sum of Pauli strings.
+
+        The local space of ``site`` is the product of its qubits, one per
+        two-level quantum number. The operator is expanded in products of
+        Pauli matrices on those qubits, and each product is read as the
+        product of single-mode operators in the order of the quantum
+        numbers, with each :math:`\sigma^{x,y}` on a fermionic qubit
+        replaced by its Jordan-Wigner image
+        :math:`\prod_{q'<q}(-1)^{N_{q'}}\,\sigma^{x,y}_q`.
+
+        This is the convention in which the local matrices of the ALPS
+        library are written: ``c_up`` and ``c_down`` act on their own
+        quantum number with matrix element 1, ``Splus`` is
+        :math:`c^\dagger_\uparrow c_\downarrow`, and so on. The resulting
+        mode operators satisfy the canonical anticommutation relations,
+        also between modes of the same site.
+        """
+        # pylint: disable=import-outside-toplevel
+        from qalma.operators.pauli import (
+            PAULI_MATRICES,
+            _I_POWERS,
+            _product_phase,
+            _site_index,
+            pauli_dict_to_operator,
+        )
+        from qalma.qutip_tools.tools import _to_array
+
+        qubits = self.site_qubits[site]
+        n_qubits = len(qubits)
+        site_basis = self.physical_sites[site]
+        qn_index = site_basis["qn_index"]
+        qubit_bases = [self.sites[q] for q in qubits]
+        positions = [qn_index[next(iter(b["qn"]))] for b in qubit_bases]
+        lowers = [b["localstates"][0][0] for b in qubit_bases]
+
+        # Rewrite the local matrix in the product basis of the qubits.
+        matrix = _to_array(local_op)
+        permutation = np.array(
+            [
+                sum(
+                    int(round(state[pos] - low)) << (n_qubits - 1 - r)
+                    for r, (pos, low) in enumerate(zip(positions, lowers))
+                )
+                for state in site_basis["localstates"]
+            ]
+        )
+        product_matrix = np.zeros_like(matrix, dtype=complex)
+        product_matrix[np.ix_(permutation, permutation)] = matrix
+
+        index = _site_index(self)
+        mask = index.mask
+        qubit_shift = [2 * index.position[q] for q in qubits]
+        strings = self._jordan_wigner_strings()
+        coefficients: dict = {}
+        scale = 2.0**n_qubits
+        for labels in itertools.product(range(4), repeat=n_qubits):
+            pauli = PAULI_MATRICES[labels[0]]
+            for label in labels[1:]:
+                pauli = np.kron(pauli, PAULI_MATRICES[label])
+            coeff = np.trace(pauli @ product_matrix) / scale
+            if abs(coeff) < 1e-14:
+                continue
+            # Ordered product of the single-mode factors.
+            code, value = 0, complex(coeff)
+            for r, label in enumerate(labels):
+                if label == 0:
+                    continue
+                factor_code = label << qubit_shift[r]
+                if label in (1, 2) and qubit_bases[r]["fermionic"]:
+                    string_code, sign = strings[qubits[r]]
+                    factor_code |= string_code
+                    value *= sign
+                k, code = _product_phase(code, factor_code, mask)
+                value *= _I_POWERS[k]
+            coefficients[code] = coefficients.get(code, 0) + value
+        coefficients = {c: v for c, v in coefficients.items() if abs(v) > 1e-14}
+        return pauli_dict_to_operator(coefficients, self)
 
     def bond_operator(self, name: str, src: str, dst: str, skip=None):  # -> "Operator":
         """Return a bond operator by name and sites."""
@@ -363,8 +676,8 @@ class SystemDescriptor:
             if bond_op_descriptor.find(bop + "@") >= 0
         ]
         bond_op_descriptor = bond_op_descriptor.replace("@", "__")
-        src_operators = self.sites[src]["operators"]
-        dst_operators = self.sites[dst]["operators"]
+        src_operators = self.physical_sites[src]["operators"]
+        dst_operators = self.physical_sites[dst]["operators"]
 
         # Load site operators on src and dst
         parms_and_ops = {
@@ -533,6 +846,17 @@ class SystemDescriptor:
             return ScalarOperator(0, self)
         if len(term_ops) == 1:
             return term_ops[0]
+        if self.qubit_representation:
+            # Odd site terms carry Jordan-Wigner strings: they are not
+            # one-body operators in the qubit representation.
+            from qalma.operators import SumOperator
+            from qalma.operators.pauli import to_pauli_sum
+
+            term_ops = [
+                op if hasattr(op, "system") else ScalarOperator(op, self)
+                for op in term_ops
+            ]
+            return to_pauli_sum(SumOperator(tuple(term_ops), self))
         return OneBodyOperator(tuple(term_ops), self)
 
     def bond_term_from_descriptor(self, term_spec, graph, model, parms):
@@ -676,7 +1000,7 @@ class SystemDescriptor:
     def global_operator(self, name):
         """Return a global operator by its name."""
         # pylint: disable=import-outside-toplevel
-        from qalma.operators import OneBodyOperator, SumOperator
+        from qalma.operators import OneBodyOperator, ScalarOperator, SumOperator
 
         if len(self.operators["site_operators"]) == 0:
             self._load_site_operators()
@@ -737,6 +1061,19 @@ class SystemDescriptor:
             return None
 
         interaction_terms = bond_terms + loop_terms
+        if self.qubit_representation:
+            # pylint: disable=import-outside-toplevel
+            from qalma.operators.pauli import to_pauli_sum
+
+            all_terms = site_terms + interaction_terms
+            if not all_terms:
+                result = ScalarOperator(0, self)
+            elif len(all_terms) == 1:
+                result = to_pauli_sum(all_terms[0])
+            else:
+                result = to_pauli_sum(SumOperator(all_terms, self))
+            self.operators["global_operators"][name] = result
+            return result
         if interaction_terms:
             result = SumOperator(site_terms + interaction_terms, self, True)
         else:
@@ -758,11 +1095,18 @@ def build_system(
     model_name: str = "spin",
     models_lib_file=MODEL_LIB_FILE,
     lattice_lib_file=LATTICE_LIB_FILE,
+    qubit_split: Optional[bool] = None,
     **kwargs,
 ) -> SystemDescriptor:
     """Build a SystemDescriptor from the names of the geometry and the model.
 
     lattice_lib_file: str
+
+    qubit_split: bool or None
+        Represent the sites by qubits (one per two-level quantum number),
+        with fermions mapped through the Jordan-Wigner transformation.
+        See :class:`SystemDescriptor`. By default, this is done for
+        fermionic models whose sites can be split into qubits.
 
     kwargs: Optional keyword parameters are passed to the model.
     """
@@ -781,7 +1125,7 @@ def build_system(
 
     assert model is not None
     assert graph is not None
-    return SystemDescriptor(graph, model, parms)
+    return SystemDescriptor(graph, model, parms, qubit_split=qubit_split)
 
 
 def build_system_from_dims(dims_by_name: Dict[str, int]) -> SystemDescriptor:

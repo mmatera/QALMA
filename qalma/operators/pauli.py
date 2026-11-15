@@ -687,7 +687,9 @@ def to_pauli_sum(operator: Operator, atol: float = QALMA_TOLERANCE) -> Operator:
             coefficients[code] = coefficients.get(code, 0) + coeff
 
     def visit(op: Operator):
-        if isinstance(op, PauliStringOperator):
+        if isinstance(op, (int, float, complex, np.number)):
+            coefficients[0] = coefficients.get(0, 0) + op
+        elif isinstance(op, PauliStringOperator):
             code = op.code_in(system)
             coefficients[code] = coefficients.get(code, 0) + op.prefactor
         elif isinstance(op, ProductOperator):

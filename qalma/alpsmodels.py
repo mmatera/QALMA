@@ -523,6 +523,8 @@ def model_from_alps_xml(filename=MODEL_LIB_FILE, name="spin", parms=None):
             "operators": operators,
             "parms": parms,
             "localstates": local_basis,
+            # position of each quantum number in the tuples of ``localstates``
+            "qn_index": qn_pos,
         }
 
     def process_hamiltonian(ham, parms):

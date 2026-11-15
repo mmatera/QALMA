@@ -383,7 +383,8 @@ class GibbsDensityOperator(DensityOperatorMixin, Operator):
         all_sites = tuple(system.sites)
         if block is None:
             block = tuple(sorted(all_sites))
-        elif len(block) < len(all_sites):
+        n_kept = len(block)
+        if n_kept < len(all_sites):
             assert all(
                 site in all_sites for site in block
             ), "sites must be in the (sub)system"
@@ -391,6 +392,7 @@ class GibbsDensityOperator(DensityOperatorMixin, Operator):
                 sorted((site for site in all_sites if site not in block))
             )
 
+        # The matrices below are already written in the order of ``block``.
         if self.normalized:
             result = (-self.k).to_qutip(block).expm()
         else:
@@ -401,9 +403,8 @@ class GibbsDensityOperator(DensityOperatorMixin, Operator):
             self.k = self.k + log_prefactor
             self._free_energy = -log_prefactor
             self.normalized = True
-            if block:
-                result = result.permute(tuple(all_sites.index(site) for site in block))
-            result = result.ptrace(tuple(range(len(block))))
+        if n_kept < len(block):
+            result = result.ptrace(tuple(range(n_kept)))
         return result
 
 
