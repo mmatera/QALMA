@@ -110,7 +110,13 @@ def _qubit_layout(physical_sites: dict, qubit_split: Optional[bool]) -> Optional
             return None
         single = len(binary) == 1
         layout[node] = [
-            (node if single else f"{node}:{qn_name}", qn_name, position, lower, fermionic)
+            (
+                node if single else f"{node}:{qn_name}",
+                qn_name,
+                position,
+                lower,
+                fermionic,
+            )
             for qn_name, position, lower, fermionic in binary
         ]
         has_fermions = has_fermions or any(entry[3] for entry in binary)
@@ -218,7 +224,9 @@ class SystemDescriptor:
             self.site_qubits = {node: (node,) for node in self.sites}
         else:
             qubit_sites = {
-                name: _qubit_site_basis(node, qn_name, lower, fermionic, physical_sites[node])
+                name: _qubit_site_basis(
+                    node, qn_name, lower, fermionic, physical_sites[node]
+                )
                 for node, entries in layout.items()
                 for name, qn_name, _, lower, fermionic in entries
             }
@@ -392,7 +400,9 @@ class SystemDescriptor:
                 from qalma.operators.pauli import to_pauli_sum
 
                 local_terms = tuple(
-                    self.site_operator(site_basis["qn"][constraint_qn]["operator"], node)
+                    self.site_operator(
+                        site_basis["qn"][constraint_qn]["operator"], node
+                    )
                     for node, site_basis in self.physical_sites.items()
                     if constraint_qn in site_basis["qn"]
                 )
@@ -593,8 +603,8 @@ class SystemDescriptor:
         """
         # pylint: disable=import-outside-toplevel
         from qalma.operators.pauli import (
-            PAULI_MATRICES,
             _I_POWERS,
+            PAULI_MATRICES,
             _product_phase,
             _site_index,
             pauli_dict_to_operator,

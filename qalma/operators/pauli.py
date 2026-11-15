@@ -61,6 +61,7 @@ __all__ = [
     "fermion_annihilation",
     "fermion_creation",
     "fermion_number",
+    "is_pauli_sum",
     "majorana_operators",
     "pauli_terms",
     "to_pauli_sum",
@@ -228,7 +229,9 @@ class PauliStringOperator(ProductOperator):
             code = 0
             position = index.position
             for site, pauli in paulis.items():
-                local = _LABEL_TO_CODE.get(pauli, -1) if isinstance(pauli, str) else pauli
+                local = (
+                    _LABEL_TO_CODE.get(pauli, -1) if isinstance(pauli, str) else pauli
+                )
                 if not 0 <= local <= 3:
                     raise ValueError(f"invalid Pauli code {pauli!r} at {site}.")
                 if local:
@@ -462,7 +465,9 @@ class PauliStringOperator(ProductOperator):
         paulis = self.paulis
         if any(site not in sites for site in paulis):
             return ScalarOperator(0, subsystem)
-        prefactor = self.prefactor * 2 ** (len(self.system.sites) - len(subsystem.sites))
+        prefactor = self.prefactor * 2 ** (
+            len(self.system.sites) - len(subsystem.sites)
+        )
         if not paulis:
             return ScalarOperator(prefactor, subsystem)
         return self._new(self.code_in(subsystem), prefactor, subsystem)
@@ -504,6 +509,31 @@ class PauliStringOperator(ProductOperator):
         """Return the equivalent dense :class:`ProductOperator`."""
         return ProductOperator(dict(self.site_factors), self.prefactor, self.system)
 
+    def __getstate__(self):
+        """Pickle the code, the prefactor and the system, not the caches."""
+        return {
+            "code": self.code,
+            "prefactor": self.prefactor,
+            "system": self.system,
+            "_to_qutip_cache": {},
+        }
+
+    def save_hdf5(self, parent, name: str):
+        """Store the string as the group ``parent[name]`` (see :mod:`qalma.operators.hdf5`)."""
+        from .hdf5 import save_operator
+
+        return save_operator(parent, name, self)
+
+    @classmethod
+    def load_hdf5(cls, group, system: Optional[SystemDescriptor] = None):
+        """Load a string stored with :meth:`save_hdf5`."""
+        from .hdf5 import load_operator
+
+        result = load_operator(group, system)
+        if not isinstance(result, cls):
+            raise TypeError(f"{group.name} does not hold a Pauli string.")
+        return result
+
     def _set_system_(self, system=None):
         """Change the system, keeping the meaning of the string."""
         if system is not None and self.system is not None:
@@ -543,6 +573,7 @@ def pauli_terms(
 
     if isinstance(operator, (PauliStringOperator, ScalarOperator)):
         return [operator]
+    # PauliSumOperator is a SumOperator whose terms are strings and scalars.
     if isinstance(operator, SumOperator):
         result = []
         for term in operator.terms:
@@ -563,24 +594,23 @@ def _code_and_prefactor(term, system) -> Tuple[int, complex]:
 def pauli_dict_to_operator(
     coefficients: Mapping[int, complex], system: SystemDescriptor
 ) -> Operator:
-    """Build the operator :math:`\\sum_c a_c P_c` from a mapping ``code -> a_c``."""
-    from .arithmetic import SumOperator
+    """Build :math:`\\sum_c a_c P_c` from a mapping ``code -> a_c``.
 
-    terms = []
-    scalar = coefficients.get(0, 0)
-    for code, coeff in coefficients.items():
-        if code and coeff:
-            terms.append(PauliStringOperator._new(code, coeff, system))
-    if scalar:
-        terms.append(ScalarOperator(scalar, system))
-    if not terms:
+    Returns a :class:`ScalarOperator`, a :class:`PauliStringOperator` or a
+    :class:`~qalma.operators.pauli_sum.PauliSumOperator`, depending on the
+    number of terms.
+    """
+    from .pauli_sum import PauliSumOperator
+
+    coefficients = {code: coeff for code, coeff in coefficients.items() if coeff}
+    if not coefficients:
         return ScalarOperator(0, system)
-    if len(terms) == 1:
-        return terms[0]
-    isherm = all(abs(np.imag(c)) < QALMA_TOLERANCE for c in coefficients.values())
-    # Equal strings are already merged, so the sum is marked as simplified to
-    # prevent ``SumOperator.simplify`` from turning it into a dense operator.
-    return SumOperator(tuple(terms), system, isherm=isherm, simplified=True)
+    if len(coefficients) == 1:
+        ((code, coeff),) = coefficients.items()
+        if code == 0:
+            return ScalarOperator(coeff, system)
+        return PauliStringOperator._new(code, coeff, system)
+    return PauliSumOperator.from_dict(coefficients, system).collapse()
 
 
 def collect_pauli_terms(
@@ -595,46 +625,41 @@ def collect_pauli_terms(
     return result
 
 
-def _bilinear_pauli(op_1: Operator, op_2: Operator, anticommutator: bool) -> Operator:
-    """Commutator or anticommutator of two sums of Pauli strings."""
-    terms_1, terms_2 = pauli_terms(op_1), pauli_terms(op_2)
-    assert terms_1 is not None and terms_2 is not None
-    system = op_1.system.union(op_2.system)
-    mask = _site_index(system).mask
-    pairs_1 = collect_pauli_terms(terms_1, system)
-    pairs_2 = collect_pauli_terms(terms_2, system)
-    result: Dict[int, complex] = {}
-    scale: Dict[int, float] = {}
-    for code_1, coeff_1 in pairs_1.items():
-        for code_2, coeff_2 in pairs_2.items():
-            if _anticommute(code_1, code_2, mask) == anticommutator:
-                # [P, Q] = 0 if they commute; {P, Q} = 0 if they anticommute.
-                continue
-            k, code = _product_phase(code_1, code_2, mask)
-            value = 2 * coeff_1 * coeff_2 * _I_POWERS[k]
-            result[code] = result.get(code, 0) + value
-            scale[code] = max(scale.get(code, 0.0), abs(value))
-    # Drop terms that cancel up to rounding.
-    result = {
-        code: coeff
-        for code, coeff in result.items()
-        if abs(coeff) > QALMA_TOLERANCE * scale[code]
-    }
-    return pauli_dict_to_operator(result, system)
+def _bilinear_pauli(op_1: Operator, op_2: Operator, mode: str) -> Operator:
+    """Product, commutator or anticommutator of two sums of Pauli strings."""
+    from .pauli_sum import as_pauli_sum
+
+    sum_1, sum_2 = as_pauli_sum(op_1), as_pauli_sum(op_2)
+    if sum_1 is None or sum_2 is None:
+        raise TypeError("both operands must be sums of Pauli strings.")
+    return sum_1._binary(sum_2, mode)
 
 
 def commutator_pauli(op_1: Operator, op_2: Operator) -> Operator:
     r"""Commutator of two sums of Pauli strings, computed symbolically.
 
     Uses :math:`[P, Q] = 0` if the strings commute and :math:`2PQ`
-    otherwise. Both arguments must satisfy ``pauli_terms(op) is not None``.
+    otherwise, for all the pairs of terms at once (see
+    :class:`~qalma.operators.pauli_sum.PauliSumOperator`).
     """
-    return _bilinear_pauli(op_1, op_2, anticommutator=False)
+    return _bilinear_pauli(op_1, op_2, "commutator")
 
 
 def anticommutator_pauli(op_1: Operator, op_2: Operator) -> Operator:
     r"""Anticommutator of two sums of Pauli strings, computed symbolically."""
-    return _bilinear_pauli(op_1, op_2, anticommutator=True)
+    return _bilinear_pauli(op_1, op_2, "anticommutator")
+
+
+def is_pauli_sum(operator) -> bool:
+    """``True`` if ``operator`` is a (possibly nested) sum of Pauli strings and scalars."""
+    from .arithmetic import SumOperator
+    from .pauli_sum import PauliSumOperator
+
+    if isinstance(operator, (PauliStringOperator, ScalarOperator, PauliSumOperator)):
+        return True
+    if isinstance(operator, SumOperator):
+        return all(is_pauli_sum(term) for term in operator.terms)
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -642,7 +667,9 @@ def anticommutator_pauli(op_1: Operator, op_2: Operator) -> Operator:
 # ---------------------------------------------------------------------------
 
 
-def _local_pauli_components(matrix: np.ndarray, atol: float) -> List[Tuple[int, complex]]:
+def _local_pauli_components(
+    matrix: np.ndarray, atol: float
+) -> List[Tuple[int, complex]]:
     r"""Coefficients :math:`\mathrm{Tr}(\sigma^a M)/2` of a 2x2 matrix."""
     matrix = np.asarray(matrix)
     if matrix.shape != (2, 2):
@@ -668,7 +695,10 @@ def to_pauli_sum(operator: Operator, atol: float = QALMA_TOLERANCE) -> Operator:
     form.
     """
     from .arithmetic import SumOperator
+    from .pauli_sum import PauliSumOperator
 
+    if isinstance(operator, PauliSumOperator):
+        return operator.collapse()
     system = operator.system
     coefficients: Dict[int, complex] = {}
 
@@ -692,6 +722,10 @@ def to_pauli_sum(operator: Operator, atol: float = QALMA_TOLERANCE) -> Operator:
         elif isinstance(op, PauliStringOperator):
             code = op.code_in(system)
             coefficients[code] = coefficients.get(code, 0) + op.prefactor
+        elif isinstance(op, PauliSumOperator):
+            for code, coeff in op.to_dict().items():
+                code = _remap_code(code, op.system, system)
+                coefficients[code] = coefficients.get(code, 0) + coeff
         elif isinstance(op, ProductOperator):
             add_product(op.site_factors, op.prefactor, op.system)
         elif isinstance(op, LocalOperator):

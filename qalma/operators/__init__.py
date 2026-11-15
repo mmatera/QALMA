@@ -26,6 +26,7 @@ from .basic import (
     Operator,
 )
 from .pauli import PauliStringOperator, to_pauli_sum
+from .pauli_sum import PauliSumOperator
 from .product import (
     ProductOperator,
     ScalarOperator,
@@ -47,6 +48,7 @@ __all__ = [
     "OneBodyOperator",
     "Operator",
     "PauliStringOperator",
+    "PauliSumOperator",
     "ProductOperator",
     "QuadraticFormOperator",
     "QutipOperator",

@@ -750,7 +750,7 @@ class OneBodyOperator(SumOperator):
                 terms.append(term)
             elif isinstance(term, ProductOperator) and len(term.acts_over()) == 1:
                 # e.g. a single-site PauliStringOperator
-                (site, factor), = term.site_factors.items()
+                ((site, factor),) = term.site_factors.items()
                 terms.append(LocalOperator(site, factor * term.prefactor, term.system))
             elif isinstance(term, QutipOperator):
                 terms.append(

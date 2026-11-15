@@ -44,7 +44,11 @@ def find_arithmetic_implementation(
     fallback_1 = DISPATCH_FALLBACK.get(type_op1, type_op1)
     fallback_2 = DISPATCH_FALLBACK.get(type_op2, type_op2)
     if (fallback_1, fallback_2) != (type_op1, type_op2):
-        for key in ((fallback_1, type_op2), (type_op1, fallback_2), (fallback_1, fallback_2)):
+        for key in (
+            (fallback_1, type_op2),
+            (type_op1, fallback_2),
+            (fallback_1, fallback_2),
+        ):
             func = dispatch_table.get(key, None)
             if func is not None:
                 dispatch_table[(type_op1, type_op2)] = func

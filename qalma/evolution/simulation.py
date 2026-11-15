@@ -31,6 +31,13 @@ import numpy as np
 
 from qalma.model import SystemDescriptor
 from qalma.operators.basic import Operator
+from qalma.operators.pauli import PauliStringOperator
+from qalma.operators.pauli_sum import PauliSumOperator
+from qalma.operators.hdf5 import (
+    is_operator_group,
+    load_operator,
+    save_operator,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +48,17 @@ def store_hdf5_dict(group: h5py.Group, data_dict: Dict[str, Any]):
     """Store data in a Python dict in a group of a hdf5 file.
 
     Basic types and numpy.ndarray values in data_dict are stored as
-    native HDF5 data types. Other objects are stored as pickle byte
-    streams.
+    native HDF5 data types. Operators with a native HDF5 format (Pauli
+    strings and sums of them, see :mod:`qalma.operators.hdf5`) are stored as
+    subgroups. Other objects are stored as pickle byte streams.
     """
     for key, value in data_dict.items():
         key_str = str(key)
+        if isinstance(value, (PauliStringOperator, PauliSumOperator)):
+            if key_str in group:
+                del group[key_str]
+            save_operator(group, key_str, value)
+            continue
         if isinstance(value, str):
             if key_str in group:
                 del group[key_str]
@@ -147,11 +160,23 @@ def store_state(key, state, group, system=None):
     )[0] = np.frombuffer(serialize_state(state), dtype=np.uint8)
 
 
-def load_hdf5_dict(group: h5py.Group) -> Dict[str, Any]:
-    """Load data from a Python dict stored as a group in a hdf5 file."""
+def load_hdf5_dict(
+    group: h5py.Group, system: Optional[SystemDescriptor] = None
+) -> Dict[str, Any]:
+    """Load data from a Python dict stored as a group in a hdf5 file.
+
+    Operators stored natively are loaded into ``system`` (or, if it is
+    ``None``, into a system built from the stored site names).
+    """
     loaded_dict = {}
     for key_str in group.keys():
         dataset = group[key_str]
+        if is_operator_group(dataset):
+            loaded_dict[key_str] = load_operator(dataset, system)
+            continue
+        if isinstance(dataset, h5py.Group):
+            logger.warning("group %s is not an operator: skipped.", dataset.name)
+            continue
         raw_data = dataset[()]
         if dataset.dtype.kind == "O":
             if isinstance(raw_data, (bytes, np.bytes_)):
@@ -391,12 +416,12 @@ class SimulationHDF5(Simulation):
         """Create an interface with an HDF5 file that stores a simulation."""
         self.filename = filename
         with h5py.File(filename, "r") as f:
-            self.parameters = load_hdf5_dict(f["parameters"])
-            self.stats = load_hdf5_dict(f["stats"])
-            self.expect_ops = load_hdf5_dict(f["expect obs"])
+            self.system = system_from_hdf5(f)
+            self.parameters = load_hdf5_dict(f["parameters"], self.system)
+            self.stats = load_hdf5_dict(f["stats"], self.system)
+            self.expect_ops = load_hdf5_dict(f["expect obs"], self.system)
             stored_time_span = list(f["time span"])
             self.time_span = stored_time_span
-            self.system = system_from_hdf5(f)
             self.key_map = {
                 t: f"{pos}".rjust(6, "0") for pos, t in enumerate(stored_time_span)
             }

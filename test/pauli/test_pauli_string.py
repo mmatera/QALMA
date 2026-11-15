@@ -11,7 +11,6 @@ from qalma.operators import (
     PauliStringOperator,
     ProductOperator,
     ScalarOperator,
-    SumOperator,
     to_pauli_sum,
 )
 from qalma.operators.functions import anticommutator, commutator
@@ -55,7 +54,9 @@ def test_single_site_products(a, b):
     expected = PAULI_MATRICES["IXYZ".index(a)] @ PAULI_MATRICES["IXYZ".index(b)]
     result = p * q
     assert isinstance(result, (PauliStringOperator, ScalarOperator))
-    assert np.allclose(dense(result), np.kron(expected, np.eye(8)) if False else dense(p) @ dense(q))
+    assert np.allclose(
+        dense(result), np.kron(expected, np.eye(8)) if False else dense(p) @ dense(q)
+    )
     # the label of the product is the XOR of the labels
     if isinstance(result, PauliStringOperator):
         assert result.code == p.code ^ q.code
@@ -97,9 +98,7 @@ def test_mixed_with_product_operator():
     p = random_string()
     sx = SYSTEM.site_operator(f"Sx@{SITES[1]}")
     sz = SYSTEM.site_operator(f"Sz@{SITES[2]}")
-    prod = ProductOperator(
-        {SITES[1]: sx.operator, SITES[2]: sz.operator}, 1.3, SYSTEM
-    )
+    prod = ProductOperator({SITES[1]: sx.operator, SITES[2]: sz.operator}, 1.3, SYSTEM)
     for other in (sx, prod):
         assert np.allclose(dense(p * other), dense(p) @ dense(other))
         assert np.allclose(dense(other * p), dense(other) @ dense(p))
@@ -211,4 +210,6 @@ def test_subsystem_with_different_order():
     p = PauliStringOperator.from_label("IZXI", SYSTEM)
     prod = p * p_sub
     assert prod.system is SYSTEM
-    assert np.allclose(dense(prod), dense(p) @ dense(PauliStringOperator(p_sub.paulis, 1.0, SYSTEM)))
+    assert np.allclose(
+        dense(prod), dense(p) @ dense(PauliStringOperator(p_sub.paulis, 1.0, SYSTEM))
+    )
