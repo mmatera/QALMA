@@ -72,6 +72,31 @@ Custom parameters are passed via the ``parms`` dictionary::
     model = model_from_alps_xml(name="Heisenberg", parms={"S": "1", "Jz": 1.0})
     graph = graph_from_alps_xml(name="square lattice", parms={"L": 4, "W": 4})
 
+Fermionic models and qubits
+---------------------------
+
+When a model has fermionic quantum numbers and the local space of every
+site is a product of quantum numbers that take two values (``N`` in
+``spinless fermions``; ``Nup`` and ``Ndown`` in ``fermion Hubbard``; also
+the spin-1/2 sites of ``Kondo lattice``), each of those quantum numbers
+becomes a qubit::
+
+    system = build_system("chain lattice", "fermion Hubbard", L=4, U=2)
+    list(system.sites)        # ['1[0]:Nup', '1[0]:Ndown', '1[1]:Nup', ...]
+    system.site_qubits["1[0]"]  # ('1[0]:Nup', '1[0]:Ndown')
+
+The fermionic modes are mapped to Pauli strings through the Jordan-Wigner
+transformation, in the order of ``system.sites``, so they anticommute also
+within a site. Site operators are still requested by the name of the node
+(``system.site_operator("c_up", "1[0]")``), and they are, like the global
+operators, sums of Pauli strings
+(:class:`~qalma.operators.PauliSumOperator`). A site with a single qubit
+keeps the name of the node.
+
+``build_system(..., qubit_split=True)`` forces the representation for any
+model whose sites are products of two-level quantum numbers (e.g. spin 1/2
+chains), and ``qubit_split=False`` disables it.
+
 .. seealso::
 
    :mod:`qalma.model`, :mod:`qalma.geometry`, :mod:`qalma.alpsmodels`

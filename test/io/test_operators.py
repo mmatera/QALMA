@@ -25,11 +25,14 @@ from qalma.model import build_system_from_dims
 from qalma.operators import (
     LocalOperator,
     OneBodyOperator,
+    PauliStringOperator,
+    PauliSumOperator,
     ProductOperator,
     QuadraticFormOperator,
     QutipOperator,
     ScalarOperator,
     SumOperator,
+    to_pauli_sum,
 )
 from qalma.operators.states import (
     GibbsDensityOperator,
@@ -79,6 +82,9 @@ CASES["qutip, permuted sites"] = QutipOperator(
 CASES["reduced state"] = TEST_CASES_STATES["gibbs_H"].partial_trace(
     frozenset(SITES[:2])
 )
+CASES["pauli string"] = PauliStringOperator({SITES[0]: "X", SITES[2]: "Y"}, 0.5j, SYSTEM)
+CASES["pauli sum"] = to_pauli_sum(HAMILTONIAN)
+CASES["gibbs, pauli generator"] = GibbsDensityOperator(to_pauli_sum(HAMILTONIAN), SYSTEM)
 
 ALL_CLASSES = {
     GibbsDensityOperator,
@@ -86,6 +92,8 @@ ALL_CLASSES = {
     LocalOperator,
     MixtureDensityOperator,
     OneBodyOperator,
+    PauliStringOperator,
+    PauliSumOperator,
     ProductDensityOperator,
     ProductOperator,
     QuadraticFormOperator,
@@ -225,6 +233,8 @@ def test_file_has_no_pickle_and_fixed_labels(tmp_path):
         "local",
         "mixture",
         "one_body",
+        "pauli_string",
+        "pauli_sum",
         "product",
         "product_state",
         "quadratic",

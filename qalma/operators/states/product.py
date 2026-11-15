@@ -202,6 +202,11 @@ class ProductDensityOperator(DensityOperatorMixin, ProductOperator):
 
             return result
 
+        expect_product = getattr(obs_objs, "expect_product", None)
+        if expect_product is not None:
+            # e.g. PauliSumOperator: vectorized over the terms
+            return expect_product(self.site_factors)
+
         if isinstance(obs_objs, SumOperator):
             obs_sum = cast(SumOperator, obs_objs)
             return cast(

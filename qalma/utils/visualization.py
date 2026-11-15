@@ -88,7 +88,10 @@ def draw_operator(op, axis: "_PLTAxes") -> "_PLTAxes":
         return axis
     acts_over = op.acts_over()
     if acts_over is not None:
-        coords = [g.nodes[site]["coords"] for site in acts_over]
+        # With the qubit representation, sites are qubits of the graph nodes.
+        qubit_parent = getattr(system, "qubit_parent", {})
+        nodes = {qubit_parent.get(site, site) for site in acts_over}
+        coords = [g.nodes[node]["coords"] for node in nodes]
         coords = [(x[0], 0) if len(x) == 1 else x for x in coords]
         if len(coords) == 1:
             axis.add_artist(_import_patches().Circle(coords[0], 0.1))
