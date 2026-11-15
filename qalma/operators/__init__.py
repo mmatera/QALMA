@@ -25,6 +25,7 @@ from .basic import (
     LocalOperator,
     Operator,
 )
+from .pauli import PauliStringOperator, to_pauli_sum
 from .product import (
     ProductOperator,
     ScalarOperator,
@@ -45,12 +46,14 @@ __all__ = [
     "LocalOperator",
     "OneBodyOperator",
     "Operator",
+    "PauliStringOperator",
     "ProductOperator",
     "QuadraticFormOperator",
     "QutipOperator",
     "ScalarOperator",
     "SumOperator",
     "iterable_to_operator",
+    "to_pauli_sum",
     # Subpackages
     "functions",
     "states",

@@ -10,6 +10,11 @@ from qalma.operators.arithmetic import SumOperator, iterable_to_operator
 from qalma.operators.basic import (
     Operator,
 )
+from qalma.operators.pauli import (
+    anticommutator_pauli,
+    commutator_pauli,
+    pauli_terms,
+)
 from qalma.operators.simplify import _commutator_term_pairs, collect_nbody_terms
 from qalma.parallel import USE_PARALLEL, commutator_qalma_parallel
 
@@ -129,8 +134,25 @@ def commutator_qalma_serial(op_1: Operator, op_2: Operator) -> Operator:
     return iterable_to_operator(terms, system).simplify()
 
 
-anticommutator_qalma = anticommutator_qalma_serial
-
-commutator_qalma = (
+_commutator_qalma_generic = (
     commutator_qalma_parallel if USE_PARALLEL else commutator_qalma_serial
 )
+
+
+def commutator_qalma(op_1: Operator, op_2: Operator) -> Operator:
+    """Commutator of two QALMA operators.
+
+    Sums of Pauli strings are handled symbolically by
+    :func:`qalma.operators.pauli.commutator_pauli`; any other combination
+    goes through the generic (serial or parallel) implementation.
+    """
+    if pauli_terms(op_1) is not None and pauli_terms(op_2) is not None:
+        return commutator_pauli(op_1, op_2)
+    return _commutator_qalma_generic(op_1, op_2)
+
+
+def anticommutator_qalma(op_1: Operator, op_2: Operator) -> Operator:
+    """Anticommutator of two QALMA operators (symbolic for Pauli sums)."""
+    if pauli_terms(op_1) is not None and pauli_terms(op_2) is not None:
+        return anticommutator_pauli(op_1, op_2)
+    return anticommutator_qalma_serial(op_1, op_2)

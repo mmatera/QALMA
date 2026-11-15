@@ -9,6 +9,11 @@ from qalma.operators.arithmetic import OneBodyOperator, SumOperator
 from qalma.operators.basic import (
     Operator,
 )
+from qalma.operators.pauli import (
+    PauliStringOperator,
+    collect_pauli_terms,
+    pauli_dict_to_operator,
+)
 from qalma.operators.product import (
     ProductOperator,
     ScalarOperator,
@@ -275,13 +280,27 @@ def simplify_qutip_sums(sum_operator: SumOperator) -> Operator:
     qutip_terms: Dict[frozenset, List[QutipOperator]] = {}
     product_terms: Dict[frozenset, List[ProductOperator]] = {}
 
+    pauli_strings: List[PauliStringOperator] = []
     for term in sum_operator.terms:
-        if isinstance(term, ProductOperator):
+        if isinstance(term, PauliStringOperator):
+            pauli_strings.append(term)
+        elif isinstance(term, ProductOperator):
             product_terms.setdefault(term.acts_over(), []).append(term)
         elif isinstance(term, QutipOperator):
             qutip_terms.setdefault(term.acts_over(), []).append(term)
         else:
             terms.append(term)
+
+    # Pauli strings are merged symbolically, keeping them as Pauli strings.
+    if pauli_strings:
+        merged = collect_pauli_terms(pauli_strings, system)
+        if len(merged) != len(pauli_strings):
+            changed = True
+        merged_op = pauli_dict_to_operator(merged, system)
+        if isinstance(merged_op, SumOperator):
+            terms.extend(merged_op.terms)
+        elif merged_op:
+            terms.append(merged_op)
 
     # Process first the product operator terms
     for block, p_terms in product_terms.items():

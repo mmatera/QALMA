@@ -14,10 +14,12 @@ Import order:
   5. sum       — SumOperator (most general sum type)
   6. qutip_op  — QutipOperator (QuTiP-backed fallback)
   7. quadratic — QuadraticFormOperator (highest-level composite)
+  8. pauli     — PauliStringOperator (symbolic Pauli algebra)
 """
 
 from . import local  # noqa: F401
 from . import onebody  # noqa: F401
+from . import pauli  # noqa: F401
 from . import product  # noqa: F401
 from . import quadratic  # noqa: F401
 from . import qutip_op  # noqa: F401

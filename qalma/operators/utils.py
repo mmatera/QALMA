@@ -9,7 +9,23 @@ from qalma.settings import (
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["find_arithmetic_implementation"]
+__all__ = ["find_arithmetic_implementation", "register_dispatch_fallback"]
+
+# Classes that, when no handler is registered for them, use the handlers of
+# another class (e.g. PauliStringOperator -> ProductOperator). This is
+# independent of QALMA_INFER_ARITHMETICS: only explicitly declared
+# substitutions are used.
+DISPATCH_FALLBACK: dict = {}
+
+
+def register_dispatch_fallback(cls: type, base: type):
+    """Use the arithmetic handlers of ``base`` for ``cls`` when ``cls`` has none.
+
+    ``cls`` must be a subclass of ``base`` whose instances provide the
+    interface that the handlers of ``base`` rely on.
+    """
+    assert issubclass(cls, base)
+    DISPATCH_FALLBACK[cls] = base
 
 
 def find_arithmetic_implementation(
@@ -24,6 +40,16 @@ def find_arithmetic_implementation(
     store it.
     """
     type_op1, type_op2 = type(op1), type(op2)
+    # Explicitly declared substitutions first
+    fallback_1 = DISPATCH_FALLBACK.get(type_op1, type_op1)
+    fallback_2 = DISPATCH_FALLBACK.get(type_op2, type_op2)
+    if (fallback_1, fallback_2) != (type_op1, type_op2):
+        for key in ((fallback_1, type_op2), (type_op1, fallback_2), (fallback_1, fallback_2)):
+            func = dispatch_table.get(key, None)
+            if func is not None:
+                dispatch_table[(type_op1, type_op2)] = func
+                return func
+
     op1_parent_classes = type_op1.__mro__
     op2_parent_classes = type_op2.__mro__
     # Go over the combinations of parent classes
