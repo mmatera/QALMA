@@ -237,6 +237,11 @@ def _system_to_spec(
     }
     if extra_basis:
         spec["extra_site_basis"] = extra_basis
+    # Only stored when it was set explicitly: by default it is decided from
+    # the model, the same way when the system is loaded.
+    qubit_split = getattr(system, "qubit_split", None)
+    if qubit_split is not None:
+        spec["qubit_split"] = bool(qubit_split)
     return spec, site_basis_keys
 
 
@@ -318,6 +323,7 @@ def read_system(group: h5py.Group) -> SystemDescriptor:
         graph = _graph_from_spec(spec["graph"])
         sites = {name: all_basis[key] for name, key in zip(names, basis_keys)}
         parms = from_jsonable(spec["parms"])
+        qubit_split = spec.get("qubit_split", None)
     except (KeyError, TypeError, ValueError, AttributeError) as exc:
         if isinstance(exc, HDF5FormatError):
             raise
@@ -326,7 +332,7 @@ def read_system(group: h5py.Group) -> SystemDescriptor:
             f"{type(exc).__name__}: {exc}"
         ) from exc
 
-    system = SystemDescriptor(graph, model, parms, sites=sites)
+    system = SystemDescriptor(graph, model, parms, sites=sites, qubit_split=qubit_split)
     if dict(system.dimensions) != dict(zip(names, dimensions)):
         raise HDF5FormatError(
             f"The dimensions in the table of sites of {where} do not match "

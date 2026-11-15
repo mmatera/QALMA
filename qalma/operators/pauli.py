@@ -229,9 +229,7 @@ class PauliStringOperator(ProductOperator):
             code = 0
             position = index.position
             for site, pauli in paulis.items():
-                local = (
-                    _LABEL_TO_CODE.get(pauli, -1) if isinstance(pauli, str) else pauli
-                )
+                local = _LABEL_TO_CODE.get(pauli, -1) if isinstance(pauli, str) else pauli
                 if not 0 <= local <= 3:
                     raise ValueError(f"invalid Pauli code {pauli!r} at {site}.")
                 if local:
@@ -465,9 +463,7 @@ class PauliStringOperator(ProductOperator):
         paulis = self.paulis
         if any(site not in sites for site in paulis):
             return ScalarOperator(0, subsystem)
-        prefactor = self.prefactor * 2 ** (
-            len(self.system.sites) - len(subsystem.sites)
-        )
+        prefactor = self.prefactor * 2 ** (len(self.system.sites) - len(subsystem.sites))
         if not paulis:
             return ScalarOperator(prefactor, subsystem)
         return self._new(self.code_in(subsystem), prefactor, subsystem)
@@ -517,22 +513,6 @@ class PauliStringOperator(ProductOperator):
             "system": self.system,
             "_to_qutip_cache": {},
         }
-
-    def save_hdf5(self, parent, name: str):
-        """Store the string as the group ``parent[name]`` (see :mod:`qalma.operators.hdf5`)."""
-        from .hdf5 import save_operator
-
-        return save_operator(parent, name, self)
-
-    @classmethod
-    def load_hdf5(cls, group, system: Optional[SystemDescriptor] = None):
-        """Load a string stored with :meth:`save_hdf5`."""
-        from .hdf5 import load_operator
-
-        result = load_operator(group, system)
-        if not isinstance(result, cls):
-            raise TypeError(f"{group.name} does not hold a Pauli string.")
-        return result
 
     def _set_system_(self, system=None):
         """Change the system, keeping the meaning of the string."""
@@ -667,9 +647,7 @@ def is_pauli_sum(operator) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _local_pauli_components(
-    matrix: np.ndarray, atol: float
-) -> List[Tuple[int, complex]]:
+def _local_pauli_components(matrix: np.ndarray, atol: float) -> List[Tuple[int, complex]]:
     r"""Coefficients :math:`\mathrm{Tr}(\sigma^a M)/2` of a 2x2 matrix."""
     matrix = np.asarray(matrix)
     if matrix.shape != (2, 2):

@@ -32,18 +32,14 @@ def _(x_op: PauliStringOperator, y_op: PauliStringOperator):
 @Operator.register_mul_handler([(PauliStringOperator, t) for t in NUMERIC_TYPES])
 def _(x_op: PauliStringOperator, y_value: complex) -> Operator:
     if y_value:
-        return PauliStringOperator._new(
-            x_op.code, x_op.prefactor * y_value, x_op.system
-        )
+        return PauliStringOperator._new(x_op.code, x_op.prefactor * y_value, x_op.system)
     return ScalarOperator(0, x_op.system)
 
 
 @Operator.register_mul_handler([(t, PauliStringOperator) for t in NUMERIC_TYPES])
 def _(y_value: complex, x_op: PauliStringOperator) -> Operator:
     if y_value:
-        return PauliStringOperator._new(
-            x_op.code, x_op.prefactor * y_value, x_op.system
-        )
+        return PauliStringOperator._new(x_op.code, x_op.prefactor * y_value, x_op.system)
     return ScalarOperator(0, x_op.system)
 
 
@@ -97,7 +93,10 @@ def _(x_op: Operator, y_op: Operator) -> Operator:
 
 _PAULI_TYPES = (PauliSumOperator, PauliStringOperator, ScalarOperator)
 _PAULI_SUM_PAIRS = [
-    (a, b) for a in _PAULI_TYPES for b in _PAULI_TYPES if PauliSumOperator in (a, b)
+    (a, b)
+    for a in _PAULI_TYPES
+    for b in _PAULI_TYPES
+    if PauliSumOperator in (a, b)
 ]
 
 

@@ -25,6 +25,8 @@ from qalma.operators import (
     LocalOperator,
     OneBodyOperator,
     Operator,
+    PauliStringOperator,
+    PauliSumOperator,
     ProductOperator,
     QuadraticFormOperator,
     QutipOperator,
@@ -55,6 +57,9 @@ from ._common import (
     to_jsonable,
     write_qobj,
 )
+from qalma.operators.pauli import _site_index
+from qalma.operators.pauli_sum import permute_codes, words_for
+
 from .system import read_sites, read_system, write_system
 
 __all__ = [
@@ -725,6 +730,86 @@ def _read_one_body(group, system, context) -> OneBodyOperator:
 
 
 # ---------------------------------------------------------------------------
+#  Pauli strings and sums of Pauli strings
+# ---------------------------------------------------------------------------
+
+
+def _codes_to_table(codes: np.ndarray, system: SystemDescriptor, context) -> np.ndarray:
+    """Codes in the order of the table of sites of the file."""
+    return permute_codes(
+        codes, _site_index(system).order, context.index, words_for(len(context.names))
+    )
+
+
+def _codes_from_table(group, codes, system: SystemDescriptor, context) -> np.ndarray:
+    """Codes in the site order of ``system``, from the order of the table."""
+    if codes.dtype != np.uint64 or codes.ndim != 2:
+        raise HDF5FormatError(
+            f"{group.name}: the codes must be a 2D array of uint64, not "
+            f"{codes.ndim}D of {codes.dtype}."
+        )
+    if codes.shape[1] != words_for(len(context.names)):
+        raise HDF5FormatError(
+            f"{group.name}: the codes have {codes.shape[1]} words, but the table "
+            f"of sites needs {words_for(len(context.names))}."
+        )
+    try:
+        return permute_codes(
+            codes, context.names, _site_index(system).position, words_for(len(system.sites))
+        )
+    except ValueError as exc:
+        raise HDF5FormatError(f"{group.name}: {exc}") from exc
+
+
+def _same_order(system: SystemDescriptor, context) -> bool:
+    return list(_site_index(system).order) == context.names
+
+
+def _write_pauli_string(group, operator: PauliStringOperator, context) -> None:
+    group.attrs["prefactor"] = complex(operator.prefactor)
+    words = words_for(len(operator.system.sites))
+    code = np.array(
+        [[(operator.code >> (64 * w)) & 0xFFFF_FFFF_FFFF_FFFF for w in range(words)]],
+        dtype=np.uint64,
+    )
+    group.create_dataset("code", data=_codes_to_table(code, operator.system, context)[0])
+
+
+def _read_pauli_string(group, system, context) -> PauliStringOperator:
+    stored = group["code"][()]
+    if stored.ndim != 1:
+        raise HDF5FormatError(f"{group.name}/code must be a 1D array.")
+    (row,) = _codes_from_table(group, stored.reshape(1, -1), system, context)
+    code = 0
+    for w, word in enumerate(row):
+        code |= int(word) << (64 * w)
+    return PauliStringOperator(code, as_number(group.attrs["prefactor"]), system)
+
+
+def _write_pauli_sum(group, operator: PauliSumOperator, context) -> None:
+    codes = _codes_to_table(operator.codes, operator.system, context)
+    create_dataset(group, "codes", codes)
+    create_dataset(group, "coeffs", np.asarray(operator.coeffs, dtype=np.complex128))
+
+
+def _read_pauli_sum(group, system, context) -> PauliSumOperator:
+    coeffs = np.asarray(group["coeffs"][()], dtype=np.complex128)
+    if coeffs.ndim != 1:
+        raise HDF5FormatError(f"{group.name}/coeffs must be a 1D array.")
+    stored = group["codes"][()]
+    if len(stored) != len(coeffs):
+        raise HDF5FormatError(
+            f"{group.name}: {len(stored)} codes, but {len(coeffs)} coefficients."
+        )
+    codes = _codes_from_table(group, stored, system, context)
+    # Written sorted and without repetitions: if the order of the sites
+    # did not change, the arrays are already canonical.
+    return PauliSumOperator(
+        codes, coeffs, system, simplify=not _same_order(system, context)
+    )
+
+
+# ---------------------------------------------------------------------------
 #  Qutip operators
 # ---------------------------------------------------------------------------
 
@@ -952,6 +1037,8 @@ _register("product", ProductOperator, _write_product, _read_product)
 _register("sum", SumOperator, _write_sum, _read_sum)
 _register("one_body", OneBodyOperator, _write_sum, _read_one_body)
 _register("qutip", QutipOperator, _write_qutip, _read_qutip)
+_register("pauli_string", PauliStringOperator, _write_pauli_string, _read_pauli_string)
+_register("pauli_sum", PauliSumOperator, _write_pauli_sum, _read_pauli_sum)
 _register("quadratic", QuadraticFormOperator, _write_quadratic, _read_quadratic)
 _register("gibbs", GibbsDensityOperator, _write_gibbs, _read_gibbs)
 _register(

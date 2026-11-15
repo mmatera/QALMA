@@ -7,14 +7,16 @@ Known limitations and reporting bugs
 Known limitations
 -----------------
 
-* **Fermionic models.** The signs coming from the anticommutation of
-  fermionic operators on different sites are not implemented: operators on
-  different sites always commute. Building a system from a model with
-  fermionic operators (``fermion Hubbard``, ``spinless fermions``, ``t-J``,
-  ``Kondo lattice``, ...) emits a :class:`qalma.FermionicSignWarning`. The
-  results are those of the corresponding hard-core particles, and agree
-  with the fermionic ones only when the signs cancel out, e.g. for
-  nearest-neighbour hopping of a single species on an open chain.
+* **Fermionic models.** Models whose sites are products of two-level
+  quantum numbers (``spinless fermions``, ``fermion Hubbard``,
+  ``Kondo lattice``) are represented by one qubit per quantum number, and
+  their fermionic operators are mapped to Pauli strings through the
+  Jordan-Wigner transformation, so the signs are exact (see
+  :doc:`user/systems`). For other local spaces, like the constrained basis
+  of ``t-J``, the signs coming from the anticommutation of fermionic
+  operators on different sites are not implemented: those operators
+  commute, the results are those of the corresponding hard-core particles,
+  and building the system emits a :class:`qalma.FermionicSignWarning`.
 
 * **Exact methods scale exponentially.** Operations that need the full
   matrix representation of an operator (``to_qutip``, exact

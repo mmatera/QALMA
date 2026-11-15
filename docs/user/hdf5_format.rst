@@ -114,6 +114,14 @@ The matrix of a local operator is ``pool_d{dimension}[matrix]``: each
 ``/system/pool_d{d}`` dataset has the shape ``(n, d, d)``. ``storage`` is
 the data layer of QuTiP used for the matrix in memory.
 
+In a system whose sites are split into qubits (fermionic models through the
+Jordan-Wigner transformation, see :doc:`systems`), the table of sites lists
+the qubits, like ``1[0]:Nup``, and their local bases are the entries of
+``extra_site_basis``. The nodes of the graph are the physical sites. If the
+split was forced or disabled when the system was built, ``spec`` has the key
+``qubit_split`` (``true`` or ``false``); otherwise QALMA decides it again
+from the model when the system is loaded.
+
 Values that JSON cannot represent are written as objects with a single key:
 ``{"__tuple__": [...]}``, ``{"__complex__": [re, im]}``,
 ``{"__float__": "nan"}``, ``{"__set__": [...]}``,
@@ -161,6 +169,12 @@ the positions of the sites of the subsystem.
    * - ``qutip``
      - ``QutipOperator``
      - attr ``prefactor``; dataset ``sites``; matrix in CSR
+   * - ``pauli_string``
+     - ``PauliStringOperator``
+     - attr ``prefactor``; dataset ``code (W,)``
+   * - ``pauli_sum``
+     - ``PauliSumOperator``
+     - datasets ``codes (m, W)`` and ``coeffs (m,)``
    * - ``quadratic``
      - ``QuadraticFormOperator``
      - dataset ``weights``; groups ``basis/NNNNNN``, ``linear_term`` and ``offset`` (optional)
@@ -226,6 +240,16 @@ So, for a sum of products,
 ``sites[p]`` is the site of the tensor factor ``p``. A ``qutip`` group
 without matrix is ``prefactor`` times the identity.
 
+**Pauli strings.** A product of Pauli matrices is a code of two bits per
+site of the table of sites: the bits ``(2k+1, 2k)`` hold the matrix on the
+site ``k`` (``00`` identity, ``01`` :math:`\sigma^x`, ``10``
+:math:`\sigma^y`, ``11`` :math:`\sigma^z`). The code is split into
+``W = ceil(2 n_sites / 64)`` words of type ``uint64``, the least
+significant first. A ``pauli_sum`` is
+:math:`\sum_t \mathtt{coeffs}[t]\, P(\mathtt{codes}[t])`, with the rows
+of ``codes`` sorted and without repetitions. The codes always refer to the
+table of sites of the file, also for operators on a subsystem.
+
 **States.** ``prefactor`` is the weight of the state in a mixture. A
 ``gibbs`` state is :math:`e^{-K}/\mathrm{Tr}\,e^{-K}`, with :math:`K` in
 the group ``k``; if ``normalized`` is true, :math:`\mathrm{Tr}\,e^{-K}=1`.
@@ -278,6 +302,7 @@ Reading a file without QALMA
         sites = [name.decode() for name in f["system/sites"]["name"]]
 
         # Terms of the generator of the first state, a sum of products
+        # (for a "pauli_sum", read "codes" and "coeffs" instead)
         k = f["states/000000/k"]
         offsets = k["offsets"][()]
         for t, prefactor in enumerate(k["prefactors"][()]):
