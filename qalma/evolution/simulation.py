@@ -3,10 +3,8 @@ Simulation class.
 
 This module defines the `Simulation` dataclass containing the
 state and the result of a simulation.
-`Simulation` objects can be serialized both as Python pickle and
-as  HDF5 files.
 
-To serialize a Simulation object, use the method `save_hdf5`:
+`Simulation` objects are stored as HDF5 files with the method `save_hdf5`:
 
 .. code-block:: python
 
@@ -19,184 +17,134 @@ To load back the simulation, use the classmethod ``load_hdf5``:
 
     sim = Simulation.load_hdf5(filename)
 
+
+The files do not contain Python pickles: the system, the operators and the
+states are stored as numbers, strings and arrays (see :mod:`qalma.io` and
+the section *HDF5 file format* of the user guide). Files written by older
+versions of QALMA, which contain pickles, are loaded with
+
+.. code-block:: python
+
+    sim = Simulation.load_hdf5(filename, allow_pickle=True)
+
 """
 
 import logging
+import os
 import pickle
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 import h5py
 import numpy as np
 
+from qalma.io import (
+    FORMAT_SIMULATION,
+    HDF5Context,
+    HDF5FormatError,
+    PickleNotAllowedError,
+    atomic_file,
+    legacy,
+    load_dict,
+    read_format_version,
+    read_operator,
+    store_dict,
+    write_format_attrs,
+    write_operator,
+)
+from qalma.io._common import index_name
 from qalma.model import SystemDescriptor
 from qalma.operators.basic import Operator
-from qalma.operators.pauli import PauliStringOperator
-from qalma.operators.pauli_sum import PauliSumOperator
-from qalma.operators.hdf5 import (
-    is_operator_group,
-    load_operator,
-    save_operator,
-)
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["Simulation", "SimulationHDF5"]
 
+# Attributes of a Simulation stored as dictionaries, and their groups.
+_DICT_GROUPS = ("parameters", "stats", "expect_ops")
+_TIME_SPAN = "time_span"
+
 
 def store_hdf5_dict(group: h5py.Group, data_dict: Dict[str, Any]):
     """Store data in a Python dict in a group of a hdf5 file.
 
-    Basic types and numpy.ndarray values in data_dict are stored as
-    native HDF5 data types. Operators with a native HDF5 format (Pauli
-    strings and sums of them, see :mod:`qalma.operators.hdf5`) are stored as
-    subgroups. Other objects are stored as pickle byte streams.
+    Alias of :func:`qalma.io.store_dict`.
     """
-    for key, value in data_dict.items():
-        key_str = str(key)
-        if isinstance(value, (PauliStringOperator, PauliSumOperator)):
-            if key_str in group:
-                del group[key_str]
-            save_operator(group, key_str, value)
-            continue
-        if isinstance(value, str):
-            if key_str in group:
-                del group[key_str]
-            dset = group.create_dataset(
-                key_str, data=value, dtype=h5py.string_dtype(encoding="utf-8")
-            )
-            dset.attrs["encoding"] = "utf-8"
-            continue
-        if any(isinstance(value, t) for t in [int, float, bool, np.ndarray]):
-            if key_str in group:
-                del group[key_str]
-
-            dset = group.create_dataset(key_str, data=value)
-        elif isinstance(value, (list, tuple)) and all(
-            isinstance(
-                x,
-                (
-                    int,
-                    float,
-                    bool,
-                ),
-            )
-            for x in value
-        ):
-            if key_str in group:
-                del group[key_str]
-            group.create_dataset(key_str, data=np.array(value))
-        else:
-            data = np.frombuffer(pickle.dumps(value), dtype=np.uint8)
-            if key_str in group:
-                del group[key_str]
-            dset = group.create_dataset(
-                key_str, shape=(1,), dtype=h5py.vlen_dtype(np.dtype("V1"))
-            )
-            dset.attrs["pickled"] = True
-            dset[0] = data
+    store_dict(group, data_dict)
 
 
-def store_system(group, system):
-    """Store a SystemDescription on the group."""
-    data = np.frombuffer(pickle.dumps(system), dtype=np.uint8)
-    dset = group.create_dataset(
-        "system", shape=(1,), dtype=h5py.vlen_dtype(np.dtype("V1"))
-    )
-    dset[0] = data
-
-
-def store_state(key, state, group, system=None):
-    """Serialize a single state operator into an HDF5 group.
-
-    The state is pickled and stored as a variable-length byte dataset
-    under ``key`` in ``group``, with gzip compression. If ``system`` is
-    provided, the system reference is temporarily detached before pickling
-    to avoid duplicating the system object across every stored state.
-
-    Parameters
-    ----------
-    key : str
-        Dataset name to use within ``group``.
-    state : Operator
-        The density operator or state to store.
-    group : h5py.Group
-        HDF5 group in which the dataset will be created.
-    system : SystemDescriptor or None, optional
-        If provided, the state's system reference is cleared before
-        pickling and restored afterwards, reducing file size.
-
-    """
-    if system is not None:
-
-        def serialize_state(rho):
-            """
-            Serialize the state attribute.
-
-            Pickle ``rho`` after temporarily clearing its system
-            reference.
-            """
-            state_sys = rho.system
-            rho._set_system_(None)
-            data = pickle.dumps(rho)
-            rho._set_system_(state_sys)
-            return data
-
-    else:
-
-        def serialize_state(rho):
-            """
-            Serialize the state attribute.
-
-            Pickle ``rho`` with its system reference intact.
-            """
-            return pickle.dumps(rho)
-
-    group.create_dataset(
-        key,
-        shape=(1,),
-        compression="gzip",
-        dtype=h5py.vlen_dtype(np.dtype("V1")),
-    )[0] = np.frombuffer(serialize_state(state), dtype=np.uint8)
-
-
-def load_hdf5_dict(
-    group: h5py.Group, system: Optional[SystemDescriptor] = None
-) -> Dict[str, Any]:
+def load_hdf5_dict(group: h5py.Group) -> Dict[str, Any]:
     """Load data from a Python dict stored as a group in a hdf5 file.
 
-    Operators stored natively are loaded into ``system`` (or, if it is
-    ``None``, into a system built from the stored site names).
+    Alias of :func:`qalma.io.load_dict`.
     """
-    loaded_dict = {}
-    for key_str in group.keys():
-        dataset = group[key_str]
-        if is_operator_group(dataset):
-            loaded_dict[key_str] = load_operator(dataset, system)
-            continue
-        if isinstance(dataset, h5py.Group):
-            logger.warning("group %s is not an operator: skipped.", dataset.name)
-            continue
-        raw_data = dataset[()]
-        if dataset.dtype.kind == "O":
-            if isinstance(raw_data, (bytes, np.bytes_)):
-                if "encoding" in dataset.attrs:
-                    loaded_dict[key_str] = raw_data.decode("utf-8")
-                    continue
-        if dataset.attrs.get("pickled", False):
-            try:
-                loaded_dict[key_str] = pickle.loads(dataset[0].tobytes())
-                continue
-            except (pickle.UnpicklingError, EOFError, ValueError):
-                logger.warning(
-                    " key %s was marked as containing a pickled object, but cannot be loaded.",
-                    key_str,
-                )
-                pass
-        loaded_dict[key_str] = raw_data
-        continue
+    return load_dict(group)
 
-    return loaded_dict
+
+def _write_metadata(h5file: h5py.File, simulation, context: HDF5Context) -> None:
+    """Write the dictionaries and the times of a simulation."""
+    for name in _DICT_GROUPS:
+        if name in h5file:
+            group = h5file[name]
+        else:
+            group = h5file.create_group(name, track_order=True)
+        store_dict(group, getattr(simulation, name), context, name)
+    if _TIME_SPAN in h5file:
+        del h5file[_TIME_SPAN]
+    h5file.create_dataset(
+        _TIME_SPAN, data=np.array(simulation.time_span, dtype=np.float64)
+    )
+
+
+def _write_state(group: h5py.Group, name: str, state, context, time=None) -> None:
+    """Write a state as the member ``name`` of the group of states."""
+    if not isinstance(state, Operator):
+        raise TypeError(
+            f"The state {name} is of the type {type(state).__name__}; "
+            "an Operator was expected."
+        )
+    node = write_operator(group, name, state, context)
+    if time is not None:
+        node.attrs["time"] = float(time)
+
+
+class _OpenFile:
+    """Open the file of a simulation, with its context."""
+
+    def __init__(self, simulation: "SimulationHDF5", mode: str):
+        """Check that the file can be opened in the given mode."""
+        if mode != "r" and simulation.format_version == 0:
+            raise HDF5FormatError(
+                f"{simulation.filename} was written by an old version of "
+                "QALMA, and it is read-only. To convert it to the current "
+                "format, save the simulation to a new file "
+                "(simulation.save_hdf5(new_filename)) or use "
+                "tools/pickle_to_hdf5.py."
+            )
+        self.simulation = simulation
+        self.mode = mode
+        self.h5file = None
+
+    def __enter__(self):
+        simulation = self.simulation
+        self.h5file = h5py.File(simulation.filename, self.mode)
+        try:
+            if simulation.format_version == 0:
+                context = HDF5Context(
+                    simulation.system, allow_pickle=simulation.allow_pickle
+                )
+            else:
+                context = HDF5Context.open(
+                    self.h5file, simulation.system, simulation.allow_pickle
+                )
+        except BaseException:
+            self.h5file.close()
+            raise
+        return self.h5file, context
+
+    def __exit__(self, *exc_info):
+        self.h5file.close()
+        return False
 
 
 @dataclass
@@ -209,108 +157,143 @@ class Simulation:
     expect_ops: Dict[Any, Any]
     states: List[Operator]
 
-    def save_hdf5(self, filename: str, mode="w-"):
-        """Serialize the object as an hdf5 file."""
-        try:
-            with h5py.File(filename, mode) as f:
-                store_hdf5_dict(f.create_group("parameters"), self.parameters)
-                store_hdf5_dict(f.create_group("stats"), self.stats)
-                store_hdf5_dict(f.create_group("expect obs"), self.expect_ops)
-                time_span = self.time_span
-                f.create_dataset("time span", data=np.array(time_span))
-                states = self.states
-                if states:
-                    states_group = f.create_group("states")
-                    system = states[0].system
-                    # Store the system
-                    store_system(f, system)
-                    for i, rho in enumerate(states):
-                        key = "rho_" + f"{i}".rjust(6, "0")
-                        store_state(key, rho, states_group, system)
-        except (PermissionError,) as exc:
-            logger.warning(
-                "The object could not be stored in %s. (%s)", filename, str(exc)
-            )
-            return
+    def _root_system(self) -> Optional[SystemDescriptor]:
+        """The system of the simulation: the largest one of its objects."""
+        systems = [
+            value
+            for value in self.parameters.values()
+            if isinstance(value, SystemDescriptor)
+        ]
+        systems.extend(state.system for state in self.states)
+        systems = [system for system in systems if system is not None]
+        if not systems:
+            return None
+        return max(systems, key=lambda system: len(system.sites))
 
-    @classmethod
-    def load(cls, filename: str):
-        """Load a simulation from a file, trying HDF5 first then pickle.
+    def save_hdf5(self, filename, mode: str = "w-", *, allow_pickle: bool = False):
+        """Store the simulation in an HDF5 file.
 
-        Attempts to deserialize from an HDF5 file via :meth:`load_hdf5`.
-        If the file is not a valid HDF5 file, falls back to unpickling.
+        The file is written with a temporary name and then renamed, so an
+        error does not leave an incomplete file.
 
         Parameters
         ----------
-        filename : str
+        filename : str or path-like
+            The file to write.
+        mode : str, optional
+            ``"w-"`` (default) fails if the file exists; ``"w"`` overwrites
+            it.
+        allow_pickle : bool, optional
+            Store the objects that the format does not support (for
+            instance, arbitrary objects in ``parameters``) as Python
+            pickles. By default, those objects raise a ``TypeError``, so
+            the file does not contain pickles.
+
+        Raises
+        ------
+        FileExistsError
+            If the file exists and ``mode`` is not ``"w"``.
+        TypeError
+            If the simulation has objects that cannot be stored.
+        ValueError
+            If the states do not act on the same system.
+        """
+        system = self._root_system()
+        with atomic_file(filename, mode) as h5file:
+            write_format_attrs(h5file, FORMAT_SIMULATION)
+            context = HDF5Context(None, allow_pickle=allow_pickle)
+            if system is not None:
+                context.bind(h5file, system)
+            _write_metadata(h5file, self, context)
+            states_group = h5file.create_group("states")
+            times = list(self.time_span)
+            aligned = len(times) == len(self.states)
+            for index, state in enumerate(self.states):
+                _write_state(
+                    states_group,
+                    index_name(index),
+                    state,
+                    context,
+                    times[index] if aligned else None,
+                )
+
+    @classmethod
+    def load(cls, filename, *, allow_pickle: bool = False):
+        """Load a simulation from an HDF5 file or from a pickle file.
+
+        Parameters
+        ----------
+        filename : str or path-like
             Path to the file to load.
+        allow_pickle : bool, optional
+            Allow to load pickle files, and HDF5 files that contain
+            pickles. Loading a pickle can run arbitrary code: use it only
+            with files that you trust.
 
         Returns
         -------
-        Simulation or None
-            The loaded simulation, or ``None`` if neither format succeeds.
+        Simulation
+            The loaded simulation.
 
+        Raises
+        ------
+        PickleNotAllowedError
+            If the file is, or contains, a pickle and ``allow_pickle`` is
+            False.
         """
-        try:
-            sim = cls.load_hdf5(filename)
-        except OSError:
-            sim = None
-        if sim is not None:
-            return sim
-        try:
-            with open(filename, "rb") as f:
-                return pickle.load(f)
-        except pickle.UnpicklingError:
-            return None
+        if h5py.is_hdf5(filename):
+            return cls.load_hdf5(filename, allow_pickle=allow_pickle)
+        # Raise the usual errors if the file cannot be read.
+        with open(filename, "rb") as stream:
+            if not allow_pickle:
+                raise PickleNotAllowedError(
+                    f"{filename} is not an HDF5 file. If it is a pickle of a "
+                    "Simulation and you trust it, load it with "
+                    "allow_pickle=True: loading a pickle can run arbitrary code."
+                )
+            simulation = pickle.load(stream)
+        if not isinstance(simulation, Simulation):
+            raise TypeError(
+                f"{filename} contains an object of the type "
+                f"{type(simulation).__name__}, not a Simulation."
+            )
+        return simulation
 
     @classmethod
-    def load_hdf5(cls, filename: str):
-        """Load an object serialized as an hdf5 file."""
-        return SimulationHDF5(filename)
-        try:
-            with h5py.File(filename, "r") as f:
-                parameters = load_hdf5_dict(f["parameters"])
-                stats = load_hdf5_dict(f["stats"])
-                expect_ops = load_hdf5_dict(f["expect obs"])
-                stored_time_span = f["time span"]
-                # Ensure that time span follows the right order
-                for key, data in expect_ops.items():
-                    expect_ops[key] = np.array(
-                        [
-                            q
-                            for t, q in sorted(
-                                zip(stored_time_span, data), key=lambda x: x[0]
-                            )
-                        ]
-                    )
-                time_span = sorted(stored_time_span)
-                states = []
-                for state in hdf5_state_iterator(f):
-                    states.append(state)
-                    assert (
-                        states[0].system == states[-1].system
-                    ), f"{states[0].system}!={states[-1].system}"
+    def load_hdf5(cls, filename, *, allow_pickle: bool = False):
+        """Load a simulation stored as an HDF5 file.
 
-            return cls(parameters, stats, time_span, expect_ops, states)
+        Parameters
+        ----------
+        filename : str or path-like
+            Path to the file to load.
+        allow_pickle : bool, optional
+            Allow to load the Python pickles in the file. Files written by
+            QALMA before the format 1 store the system and the states as
+            pickles, so they need ``allow_pickle=True``. Loading a pickle
+            can run arbitrary code: use it only with files that you trust.
 
-        except (
-            FileNotFoundError,
-            OSError,
-            PermissionError,
-        ) as exc:
-            logger.warning(
-                "File %s not found. Simulation object could not be loaded (%s).",
-                filename,
-                str(exc),
-            )
-            return None
+        Returns
+        -------
+        SimulationHDF5
+            An interface to the file, which loads the states on demand.
+        """
+        return SimulationHDF5(filename, allow_pickle=allow_pickle)
 
 
 class SimulationHDF5(Simulation):
     """Interface to read and write simulations stored as HDF5 files.
 
-    The interface avois to load all the states of a file at once, to
-    avoid saturate the memory.
+    The states are not loaded when the file is opened, but when they are
+    accessed, to avoid saturating the memory.
+
+    Parameters
+    ----------
+    filename : str or path-like
+        The file that stores the simulation.
+    allow_pickle : bool, optional
+        Allow to load the Python pickles in the file (see
+        :meth:`Simulation.load_hdf5`).
     """
 
     class StateList:
@@ -322,68 +305,84 @@ class SimulationHDF5(Simulation):
         saturating memory for long simulations with many stored states.
         """
 
-        def __init__(self, filename, system):
+        def __init__(self, simulation: "SimulationHDF5"):
             """
-            Initialize the Simulation object.
+            Initialize the list.
 
             Parameters
             ----------
-            filename : str
-                Path to the HDF5 file containing the simulation.
-            system : SystemDescriptor
-                System descriptor used to restore state references after
-                unpickling.
-
+            simulation : SimulationHDF5
+                The simulation that owns the states.
             """
-            self.filename = filename
-            with h5py.File(filename, "r") as f:
-                self.system = system_from_hdf5(f)
-
-        def __iter__(self):
-            """Retrieve items."""
-            with h5py.File(self.filename, "r") as f:
-                group = f.get("states", None)
-                if group is None:
-                    return
-                yield from hdf5_state_iterator(f, self.system)
-
-        def __getitem__(self, idx: int):
-            """Get item from serialization."""
-            key = "rho_" + f"{idx}".rjust(6, "0")
-            with h5py.File(self.filename, "r") as f:
-                group = f.get("states", None)
-                if group is None:
-                    raise ValueError("there are no stored elements")
-                return state_from_hdf5(f, key, self.system)
-            raise ValueError("element out of range")
-
-        def __setitem__(self, idx: int, value: Operator):
-            """Set item into serialization."""
-            key = "rho_" + f"{idx}".rjust(6, "0")
-            with h5py.File(self.filename, "r+") as f:
-                group = f.get("states", None)
-                if group is None:
-                    group = f.create_group("states")
-
-                store_state(key, value, group, self.system)
+            self._simulation = simulation
 
         def __len__(self):
             """Compute the length."""
-            with h5py.File(self.filename, "r") as f:
-                group = f.get("states", None)
-                if group is None:
-                    return 0
-                return len(group)
+            # pylint: disable=protected-access
+            with h5py.File(self._simulation.filename, "r") as h5file:
+                if self._simulation.format_version == 0:
+                    return len(legacy.state_keys(h5file))
+                return len(h5file.get("states", ()))
 
-        @staticmethod
-        def _next_key(group) -> str:
-            """Return the next available state key in ``group``."""
-            idx = len(group)
-            key = "rho_" + f"{idx}".rjust(6, "0")
-            while key in group:
-                idx += 1
-                key = "rho_" + f"{idx}".rjust(6, "0")
-            return key
+        def _load(self, h5file, context, index: int):
+            if self._simulation.format_version == 0:
+                keys = legacy.state_keys(h5file)
+                return legacy.load_state(h5file, keys[index], context.system)
+            name = f"states/{index_name(index)}"
+            if name not in h5file:
+                raise HDF5FormatError(
+                    f"{name} is missing in {self._simulation.filename}."
+                )
+            return read_operator(h5file[name], context)
+
+        def __iter__(self):
+            """Retrieve items."""
+            # pylint: disable=protected-access
+            for index in range(len(self)):
+                with self._simulation._open("r") as (h5file, context):
+                    state = self._load(h5file, context, index)
+                yield state
+
+        def __getitem__(self, idx):
+            """Get a state, or a list of states if ``idx`` is a slice."""
+            # pylint: disable=protected-access
+            length = len(self)
+            if isinstance(idx, slice):
+                with self._simulation._open("r") as (h5file, context):
+                    return [
+                        self._load(h5file, context, index)
+                        for index in range(*idx.indices(length))
+                    ]
+            index = idx + length if idx < 0 else idx
+            if not 0 <= index < length:
+                raise IndexError(
+                    f"state index {idx} out of range: the file has {length} states."
+                )
+            with self._simulation._open("r") as (h5file, context):
+                return self._load(h5file, context, index)
+
+        def __setitem__(self, idx: int, value: Operator):
+            """Replace a stored state, or append it if ``idx == len(self)``."""
+            # pylint: disable=protected-access
+            simulation = self._simulation
+            with simulation._open("r+") as (h5file, context):
+                group = h5file.require_group("states")
+                length = len(group)
+                index = idx + length if idx < 0 else idx
+                if not 0 <= index <= length:
+                    raise IndexError(
+                        f"state index {idx} out of range: the file has "
+                        f"{length} states."
+                    )
+                name = index_name(index)
+                # Write the new state before removing the one it replaces.
+                _write_state(group, f"{name}.new", value, context)
+                if name in group:
+                    del group[name]
+                group.move(f"{name}.new", name)
+                if index < len(simulation.time_span):
+                    group[name].attrs["time"] = float(simulation.time_span[index])
+                simulation.system = context.system
 
         def append(self, elem):
             """Append a state to the end of the HDF5 states group.
@@ -394,11 +393,9 @@ class SimulationHDF5(Simulation):
                 The state to append.
 
             """
-            with h5py.File(self.filename, "r+") as f:
-                group = f.require_group("states")
-                self[self._next_key(group)] = elem
+            self[len(self)] = elem
 
-        def extend(self, elems):
+        def extend(self, elems: Iterable[Operator]):
             """Append multiple states to the HDF5 states group.
 
             Parameters
@@ -407,104 +404,85 @@ class SimulationHDF5(Simulation):
                 The states to append, in order.
 
             """
-            with h5py.File(self.filename, "r+") as f:
-                group = f.require_group("states")
-                for elem in elems:
-                    self[self._next_key(group)] = elem
+            for elem in elems:
+                self.append(elem)
 
-    def __init__(self, filename):
+    def _open(self, mode: str) -> "_OpenFile":
+        """Open the file, returning the file and its context."""
+        return _OpenFile(self, mode)
+
+    def __init__(self, filename, *, allow_pickle: bool = False):
         """Create an interface with an HDF5 file that stores a simulation."""
-        self.filename = filename
-        with h5py.File(filename, "r") as f:
-            self.system = system_from_hdf5(f)
-            self.parameters = load_hdf5_dict(f["parameters"], self.system)
-            self.stats = load_hdf5_dict(f["stats"], self.system)
-            self.expect_ops = load_hdf5_dict(f["expect obs"], self.system)
-            stored_time_span = list(f["time span"])
-            self.time_span = stored_time_span
-            self.key_map = {
-                t: f"{pos}".rjust(6, "0") for pos, t in enumerate(stored_time_span)
-            }
-        self.states = self.StateList(self.filename, self.system)
+        # pylint: disable=super-init-not-called
+        self.filename = os.fspath(filename)
+        self.allow_pickle = allow_pickle
+        #: The system of the simulation, shared by all the states.
+        self.system: Optional[SystemDescriptor] = None
+        with h5py.File(self.filename, "r") as h5file:
+            #: Version of the format of the file; 0 for the files written
+            #: before the format 1, which are read-only.
+            self.format_version: int = read_format_version(h5file, FORMAT_SIMULATION)
+            if self.format_version == 0:
+                legacy.check_pickle_allowed(h5file, allow_pickle)
+                self.system = legacy.load_system(h5file)
+                self.parameters = legacy.load_dict(h5file, "parameters")
+                self.stats = legacy.load_dict(h5file, "stats")
+                self.expect_ops = legacy.load_dict(h5file, "expect_ops")
+                self.time_span = legacy.load_time_span(h5file)
+            else:
+                context = HDF5Context.open(h5file, allow_pickle=allow_pickle)
+                self.system = context.system
+                for name in _DICT_GROUPS:
+                    setattr(self, name, load_dict(h5file[name], context))
+                self.time_span = h5file[_TIME_SPAN][()].tolist()
+        self.states = self.StateList(self)  # type: ignore[assignment]
 
-    def save_hdf5(self, filename: str, mode="r+"):
-        """Serialize the object as an hdf5 file."""
-        # Here we assume that the states are serialized on the fly.
-        try:
-            with h5py.File(self.filename, mode) as f:
-                store_hdf5_dict(f["parameters"], self.parameters)
-                store_hdf5_dict(f["stats"], self.stats)
-                store_hdf5_dict(f["expect obs"], self.expect_ops)
-                time_span = self.time_span
-                f["time span"][:] = np.array(time_span)
-        except (PermissionError,) as exc:
-            logger.warning(
-                "The object could not be stored in %s. (%s)", filename, str(exc)
-            )
+    def __repr__(self):
+        """Build the repr str."""
+        return (
+            f"SimulationHDF5({self.filename!r}, format_version="
+            f"{self.format_version}, states={len(self.states)})"
+        )
+
+    def _root_system(self) -> Optional[SystemDescriptor]:
+        # Do not load all the states to find the system.
+        return self.system or super()._root_system()
+
+    def save_hdf5(
+        self,
+        filename=None,
+        mode: Optional[str] = None,
+        *,
+        allow_pickle: Optional[bool] = None,
+    ):
+        """Store the simulation in an HDF5 file.
+
+        Parameters
+        ----------
+        filename : str or path-like, optional
+            The file to write. By default, or if it is the file of this
+            simulation, ``parameters``, ``stats``, ``expect_ops`` and
+            ``time_span`` are updated in the file (the states are written
+            to the file when they are set or appended). Otherwise, the
+            simulation is copied to a new file, in the current format.
+        mode : str, optional
+            Only used to write a new file: ``"w-"`` (default) fails if
+            the file exists; ``"w"`` overwrites it.
+        allow_pickle : bool, optional
+            Store the objects that the format does not support as Python
+            pickles. By default, the value given when the file was opened.
+        """
+        if allow_pickle is None:
+            allow_pickle = self.allow_pickle
+        if filename is not None and not (
+            os.path.exists(filename) and os.path.samefile(filename, self.filename)
+        ):
+            if mode in (None, "r+", "a"):
+                mode = "w-"
+            super().save_hdf5(filename, mode, allow_pickle=allow_pickle)
             return
 
-
-def hdf5_state_iterator(group: h5py.Group, system: Optional[SystemDescriptor] = None):
-    """Yield states from a hdf5 group."""
-    if system is None:
-        system = system_from_hdf5(group)
-
-    key_time_map = {
-        t: "rho_" + f"{i}".rjust(6, "0")
-        for i, t in enumerate(group.get("time span", []))
-    }
-    if "states" not in group:
-        logger.info("no states defined in %s", group)
-        return
-    assert system is not None
-
-    for t in sorted(key_time_map):
-        key = key_time_map[t]
-        state = state_from_hdf5(group, key, system)
-        assert state.system is system
-        yield state
-
-
-def state_from_hdf5(
-    group: h5py.Group, key: str, system: Optional[SystemDescriptor] = None
-):
-    """Read a state stored in a hdf5 file by its key name."""
-    if system is None:
-        system = system_from_hdf5(group)
-    try:
-        state_bytes = group["states"][key][0]
-    except KeyError:
-        logger.info("key %s not in %s", key, group)
-        return None
-
-    assert system is not None
-    entry = pickle.loads(
-        state_bytes.tobytes() if isinstance(state_bytes, np.void) else state_bytes
-    )
-    state = entry if isinstance(entry, Operator) else None
-    # If the element is a tuple or an iterable object,
-    # return the first element.
-    if state is None:
-        for elem in entry:
-            if isinstance(elem, Operator):
-                state = elem
-                break
-
-    if state is not None:
-        if system:
-            state._set_system_(system)
-
-    return state
-
-
-def system_from_hdf5(group: h5py.Group):
-    """Read the SystemDescriptor stored in a hdf5 group."""
-    try:
-        system_bytes = group["system"][0]
-        return pickle.loads(
-            system_bytes.tobytes()
-            if isinstance(system_bytes, np.void)
-            else system_bytes
-        )
-    except KeyError:
-        return None
+        with self._open("r+") as (h5file, context):
+            context.allow_pickle = allow_pickle
+            _write_metadata(h5file, self, context)
+            self.system = context.system

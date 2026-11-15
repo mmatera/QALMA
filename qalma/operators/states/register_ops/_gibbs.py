@@ -16,6 +16,10 @@ Registered operations:
   - ScalarOp/LocalOp/ProductOp * Gibbs  ->  (convert, then mul)
 """
 
+from typing import Callable, Tuple
+
+import numpy as np
+
 from qalma.operators.arithmetic import OneBodyOperator, SumOperator
 from qalma.operators.basic import LocalOperator, Operator
 from qalma.operators.product import ProductOperator, ScalarOperator
@@ -34,6 +38,52 @@ from ._types import (
     REAL_NUMERIC_TYPES,
 )
 from ._wrappers import _wrapper_gibbs as _wrapper, _wrapper_gibbs_product
+
+
+def _inherit_gibbs_arithmetic(subclass: type) -> None:
+    """Register for ``subclass`` the arithmetic handlers of the Gibbs state.
+
+    The dispatch of the arithmetic of the operators is done on the exact
+    types of the operands, so a subclass must be registered explicitly.
+    Products by positive real scalars are overridden to preserve the type.
+    """
+    # pylint: disable=import-outside-toplevel
+    from qalma.operators.states.register_ops import _gibbs  # noqa: F401
+
+    base = GibbsDensityOperator
+    for table in (Operator.__add__dispatch__, Operator.__mul__dispatch__):
+        for (left, right), func in list(table.items()):
+            if left is base or right is base:
+                new_key = (
+                    subclass if left is base else left,
+                    subclass if right is base else right,
+                )
+                table.setdefault(new_key, func)
+                if left is base and right is base:
+                    table.setdefault((subclass, base), func)
+                    table.setdefault((base, subclass), func)
+
+    mul_table = Operator.__mul__dispatch__
+
+    def _scaled(fallback_key: Tuple[type, type]) -> Callable:
+        fallback = mul_table.get(fallback_key)
+
+        def handler(x_op, y_op):
+            state, factor = (x_op, y_op) if isinstance(x_op, subclass) else (y_op, x_op)
+            if isinstance(factor, (int, float)) and factor > 0:
+                return state._with_prefactor(  # pylint: disable=protected-access
+                    state.prefactor * factor
+                )
+            return fallback(x_op, y_op)
+
+        return handler
+
+    for key in [k for k in mul_table if k[0] is base or k[1] is base]:
+        other = key[1] if key[0] is base else key[0]
+        if other in (int, float, np.float64):
+            new_key = (subclass, other) if key[0] is base else (other, subclass)
+            mul_table[new_key] = _scaled(key)
+
 
 # TODO: consider a shortcut
 

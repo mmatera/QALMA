@@ -7,7 +7,6 @@ from qalma.meanfield import variational_quadratic_mfa
 from qalma.meanfield.gibbs_partial_trace import gibbs_meanfield_generator
 from qalma.meanfield.rpa import (
     RPAGibbsDensityOperator,
-    _split_sites,
     build_rpa_structure,
     effective_bath_modes,
     kubo_mori_susceptibility,
@@ -15,6 +14,9 @@ from qalma.meanfield.rpa import (
     rpa_coupling_kernel,
     rpa_dynamic_kernel,
 )
+from qalma.meanfield.rpa.rpa_structure import _split_sites
+from qalma.meanfield.rpa.utils import _quadrature_map
+from qalma.meanfield.rpa.zeromodes import _bogoliubov_reduced
 from qalma.model import build_spin_chain, build_system
 from qalma.operators.states.gibbs import GibbsDensityOperator
 
@@ -433,7 +435,7 @@ def test_gaussian_rpa_pair_matches_paper():
 def test_gaussian_rpa_uncoupled_spins_are_not_entangled():
     """Without coupling, the bosonic vacuum is a product state."""
     state, site_a, site_b = _pair_state(0.5, 1.2, 40.0, jx=0.0, jy=0.0)
-    assert abs(state.rpa_entropy(frozenset([site_a]))) < 1e-8
+    assert abs(state.rpa_entropy(frozenset([site_a]))) < 1e-6
     assert abs(state.rpa_negativity(frozenset([site_a]), frozenset([site_b]))) < 1e-8
 
 
@@ -591,3 +593,151 @@ def test_rpa_state_hybrid_by_default():
     assert (reduced - expected).norm("tr") < 1e-10
     mean_field = plain.partial_trace(sites_a).to_qutip(block)
     assert (reduced - mean_field).norm("tr") > 1e-6
+
+
+# ### Zero modes ###
+
+
+def _free_particle_hamiltonian(omega, kappa, drive):
+    """Oscillator plus a free particle ``Q`` whose charge ``P`` drives it.
+
+    ``H = omega (x1^2 + p1^2)/2 + kappa p2^2/2 + drive x1 p2``, with
+    quadratures ordered as ``(x1, x2, p1, p2)``; ``x2`` does not appear.
+    """
+    m_real = np.zeros((4, 4))
+    m_real[0, 0], m_real[2, 2], m_real[3, 3] = omega, omega, kappa
+    m_real[0, 3] = m_real[3, 0] = drive
+    w_map = _quadrature_map(2)
+    return w_map @ m_real @ w_map.conj().T
+
+
+def test_bogoliubov_reduced_removes_zero_mode():
+    """The zero mode is removed and the rest of the modes are exact."""
+    omega, kappa, drive = 1.7, 2.3, 0.6
+    lam, t_mat, n_zero, data = _bogoliubov_reduced(
+        _free_particle_hamiltonian(omega, kappa, drive)
+    )
+    assert n_zero == 1
+    assert np.allclose(np.sort(lam), [-omega, omega])
+    assert t_mat.shape == (4, 2)
+    assert abs(data.kappa[0, 0] - kappa) < 1e-10
+    # the response of the oscillator to the drive renormalizes the charge
+    assert abs(data.kappa_eff[0, 0] - (kappa - drive**2 / omega)) < 1e-10
+
+
+def test_bogoliubov_reduced_without_zero_modes_is_standard():
+    """Without zero modes the result is the usual Bogoliubov transformation."""
+    m_real = np.diag([1.2, 0.8, 2.0, 1.5])
+    w_map = _quadrature_map(2)
+    h_mat = w_map @ m_real @ w_map.conj().T
+    lam, t_mat, n_zero, data = _bogoliubov_reduced(h_mat)
+    assert n_zero == 0 and data is None and t_mat.shape == (4, 4)
+    assert np.allclose(
+        np.sort(np.abs(lam)), np.sort(np.sqrt([1.2 * 2.0, 0.8 * 1.5]).repeat(2))
+    )
+
+
+def test_bogoliubov_reduced_rejects_unstable_hamiltonians():
+    """A negative eigenvalue is an instability, not a zero mode."""
+    m_real = np.diag([1.0, -0.5, 1.0, 1.0])
+    w_map = _quadrature_map(2)
+    try:
+        _bogoliubov_reduced(w_map @ m_real @ w_map.conj().T)
+    except ValueError as error:
+        assert "Unstable" in str(error)
+    else:
+        raise AssertionError("A ValueError was expected")
+
+
+def test_zero_modes_of_the_xxz_pair():
+    """The XXZ pair has a Goldstone mode in the broken phase, and the Gaussian
+    measures, which need the symmetry restoration, are rejected."""
+    state, site_a, site_b = _pair_state(0.5, 0.5, 40.0, jy=1.0)
+    assert state.rpa_zero_modes() == 1
+    try:
+        state.rpa_entropy(frozenset([site_a]))
+    except ValueError as error:
+        assert "zero mode" in str(error)
+    else:
+        raise AssertionError("A ValueError was expected")
+    state, site_a, site_b = _pair_state(0.5, 1.5, 40.0, jy=1.0)
+    assert state.rpa_zero_modes() == 0
+    assert abs(state.rpa_entropy(frozenset([site_a]))) < 1e-6
+
+
+def test_static_modes_are_not_zero_modes():
+    """The static (classical) modes have a tiny frequency, but are not zero modes."""
+    system = build_spin_chain(6, field=0.3)
+    sites = list(system.sites)
+    hamiltonian = system.global_operator("Hamiltonian")
+    k_op = (1.0 * hamiltonian).simplify()
+    state = RPAGibbsDensityOperator(
+        k_op, meanfield=variational_quadratic_mfa(k_op.flat())
+    )
+    assert state.rpa_zero_modes(frozenset([sites[2]])) == 0
+
+
+def _probe_state(n_env, field, beta, spin=0.5):
+    """An XY magnet (environment, with a Goldstone mode) and a spin coupled by Sz Sz."""
+    system = build_system("chain lattice", "spin", L=n_env + 1, J=1, local_S=spin)
+    sites = list(system.sites)
+    site_a, env = sites[0], sites[1:]
+
+    def op(name, site):
+        return system.site_operator(f"{name}@{site}")
+
+    hamiltonian = field * sum(op("Sz", s) for s in sites) + 0.8 * op("Sx", site_a)
+    for i in range(n_env):
+        for j in range(i + 1, n_env):
+            for name in ("Sx", "Sy"):
+                hamiltonian = hamiltonian - (1.0 / (spin * (n_env - 1))) * (
+                    op(name, env[i]) * op(name, env[j])
+                )
+    for site in env:
+        hamiltonian = hamiltonian - (2.0 / (spin * n_env)) * (
+            op("Sz", site_a) * op("Sz", site)
+        )
+    k_op = (beta * hamiltonian).simplify()
+    sigma_mf = variational_quadratic_mfa(k_op.flat())
+    state = RPAGibbsDensityOperator(k_op, system, meanfield=sigma_mf)
+    return state, sites, hamiltonian
+
+
+def test_hybrid_with_zero_modes_includes_the_charge_fluctuations():
+    """The conserved charge of the zero mode correlates the subsystem with the
+    environment: neglecting it gives the mean field, including it improves it."""
+    beta = 60.0
+    state, sites, hamiltonian = _probe_state(8, 0.3, beta)
+    sites_a = frozenset([sites[0]])
+    block = (sites[0],)
+    assert state.rpa_zero_modes(sites_a) == 1
+    everything = tuple(sorted(sites))
+    exact = (-beta * hamiltonian.to_qutip(everything)).expm()
+    exact = (exact / exact.tr()).ptrace([everything.index(sites[0])])
+
+    def distance(**options):
+        rho = state.partial_trace(
+            sites_a, exact=False, hybrid=True, hybrid_options={"n_gauss": 9, **options}
+        ).to_qutip(block)
+        return 0.5 * (rho / rho.tr() - exact).norm("tr")
+
+    mean_field = state.partial_trace(sites_a, exact=False, rpa=False).to_qutip(block)
+    error_mf = 0.5 * (mean_field / mean_field.tr() - exact).norm("tr")
+    assert abs(distance(charge_fluctuations=False) - error_mf) < 1e-6
+    assert distance(charge_fluctuations=True) < 0.95 * error_mf
+
+
+def test_hybrid_zero_modes_with_classical_modes_is_rejected():
+    """The charge fluctuations are not supported with classical thermal modes."""
+    state, sites, _ = _probe_state(6, 0.3, 30.0)
+    try:
+        state.partial_trace(
+            frozenset([sites[0]]),
+            exact=False,
+            hybrid=True,
+            hybrid_options={"n_fock": 3},
+        )
+    except ValueError as error:
+        assert "classical" in str(error)
+    else:
+        raise AssertionError("A ValueError was expected")

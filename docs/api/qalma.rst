@@ -29,6 +29,7 @@ Subpackage reference
    operators
    states
    evolution
+   io
    scalarprod
    meanfield
    projections

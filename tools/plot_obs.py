@@ -22,8 +22,9 @@ for idx, filename in enumerate([fn for pat in sys.argv[1:] for fn in glob.glob(p
         with open(filename, "rb") as f:
             simulation = pickle.load(f)
     elif filename[-3:] == ".h5":
-        obs_key = "0"
-        simulation = Simulation.load_hdf5(filename)
+        simulation = Simulation.load_hdf5(filename, allow_pickle=True)
+        # Files written before the format 1 store the keys as strings.
+        obs_key = "0" if "0" in simulation.expect_ops else 0
     else:
         print("wrong file extension", filename)
         exit(-1)

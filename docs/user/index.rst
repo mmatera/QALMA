@@ -13,6 +13,7 @@ to build and simulate many-body quantum systems.
    operators
    states
    evolution
+   hdf5_format
    meanfield_variational
    configuration
    examples

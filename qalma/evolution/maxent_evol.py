@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import logging
-import pickle
-import uuid
+import os
 from datetime import datetime
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, cast
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -358,6 +357,7 @@ def adaptive_projected_evolution(
     ] = update_basis,
     update_condition: str = "adaptive",
     store_states=False,
+    checkpoint_file: Optional[Union[str, os.PathLike]] = None,
 ) -> Simulation:
     """Compute the solution of the MaxEnt projected Schrödinger equation.
 
@@ -419,13 +419,17 @@ def adaptive_projected_evolution(
     store_states: bool
         If True, always store the states.
 
+    checkpoint_file: str or path-like, optional
+        If given, the partial result is stored in this HDF5 file after
+        each time step, replacing the previous checkpoint. It can be loaded
+        with ``Simulation.load_hdf5``. By default, no checkpoint is written.
+
     Returns
     -------
     Simulation:
         A Simulation object storing the results of the simulation.
 
     """
-    checkpoint_name = f"__adaptative_{order}_{n_body}_{uuid.uuid4()}.pkl"
     t_0 = t_span[0]
     error = 0
     errors: List[float] = []
@@ -637,8 +641,8 @@ def adaptive_projected_evolution(
         stats["away_from_ref"].append(away)
 
         # Dump the simulation state
-        with open(checkpoint_name, "wb") as f:
-            pickle.dump(simulation, f)
+        if checkpoint_file is not None:
+            simulation.save_hdf5(checkpoint_file, mode="w")
 
     return simulation
 

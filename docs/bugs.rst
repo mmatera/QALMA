@@ -20,11 +20,12 @@ Known limitations
   matrix representation of an operator (``to_qutip``, exact
   exponentials and spectra) are limited to small systems.
 
-* **Simulation files.** HDF5 files written by
-  :class:`qalma.evolution.simulation.Simulation` store the system and the
-  states as Python pickles inside the file. As with any pickle, only open
-  files that you trust, and note that files may not be readable by other
-  versions of QALMA.
+* **Simulation files.** HDF5 files written by QALMA 1.0 or newer do not
+  contain Python pickles (see :doc:`user/hdf5_format`). Files written by
+  older versions do: they are only loaded with ``allow_pickle=True``, may
+  not be readable by other versions of QALMA and, as with any pickle,
+  should only be opened if you trust them. Functions cannot be stored, so
+  Gibbs states are stored without their symmetry projections.
 
 Reporting bugs
 --------------

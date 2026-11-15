@@ -710,6 +710,6 @@ def qutip_model_from_dims(dims: Iterable, model_name="qutip") -> ModelDescriptor
                 "parms": {},
                 "localstates": [{"n": i} for i in range(d)],
             }
-        site_basis[name] = curr_site_basis
+            site_basis[name] = curr_site_basis
 
     return ModelDescriptor(site_basis, name=model_name)

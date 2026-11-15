@@ -6,7 +6,9 @@ Utility functions to import and process ALPS specification files.
 
 """
 
+import ast
 import logging
+from functools import lru_cache
 
 import numpy as np
 
@@ -25,14 +27,79 @@ default_parms = {
 }
 
 
+# Syntax accepted in expressions: numbers, names, arithmetic operators and
+# calls to named functions. In particular, there is no attribute access, no
+# subscripts, no string literals, no comprehensions and no lambdas.
+_ALLOWED_EXPR_NODES = (
+    ast.Expression,
+    ast.BinOp,
+    ast.UnaryOp,
+    ast.Call,
+    ast.Name,
+    ast.Load,
+    ast.Constant,
+    ast.Add,
+    ast.Sub,
+    ast.Mult,
+    ast.Div,
+    ast.FloorDiv,
+    ast.Mod,
+    ast.Pow,
+    ast.MatMult,
+    ast.UAdd,
+    ast.USub,
+)
+
+
+@lru_cache(maxsize=4096)
+def _compile_expr(expr: str):
+    """Compile an arithmetic expression, rejecting any other Python syntax.
+
+    Expressions come from ALPS libraries and from simulation files, so they
+    are data and must not be able to run arbitrary code. Only the syntax
+    listed in ``_ALLOWED_EXPR_NODES`` is accepted.
+
+    Raises
+    ------
+    SyntaxError
+        If ``expr`` is not valid Python, or uses syntax that is not allowed.
+    """
+    tree = ast.parse(expr.strip(), mode="eval")
+    for node in ast.walk(tree):
+        if not isinstance(node, _ALLOWED_EXPR_NODES):
+            raise SyntaxError(
+                f"<<{expr}>> is not an arithmetic expression: "
+                f"{type(node).__name__} is not allowed."
+            )
+        if isinstance(node, ast.Constant) and not isinstance(
+            node.value, (bool, int, float, complex)
+        ):
+            raise SyntaxError(
+                f"<<{expr}>> is not an arithmetic expression: "
+                f"the constant {node.value!r} is not a number."
+            )
+        if isinstance(node, ast.Call) and (
+            not isinstance(node.func, ast.Name) or node.keywords
+        ):
+            raise SyntaxError(
+                f"<<{expr}>> is not an arithmetic expression: only calls of "
+                "the form name(arg, ...) are allowed."
+            )
+    return compile(tree, "<qalma expression>", "eval")
+
+
 def eval_expr(expr: str, parms: dict):
     """Evaluate the expression `expr` using ``parms``.
 
-    The function uses the Python ``eval`` method using the
-    ``parms`` dict as a context.
+    ``expr`` can include numbers, the names defined in ``parms``,
+    arithmetic operators and some elementary functions (``sqrt``, ``sin``,
+    ``cos``, ``tan``, ``exp``, ``log``, ``rand``).
 
-    ``expr`` can include python`s arithmetic expressions, and some
-    elementary functions.
+    Expressions are data: they are read from ALPS libraries and from
+    simulation files. To prevent them from running arbitrary code, any
+    other Python syntax (attribute access, subscripts, strings, ...) raises
+    a ``SyntaxError``, and names are only looked up in ``parms`` (Python
+    builtins are not available).
     """
     # TODO: Improve the workflow in a way that numpy functions
     # and constants be loaded just if they are needed.
@@ -80,8 +147,11 @@ def eval_expr(expr: str, parms: dict):
         if not changed:
             break
     parms.update(default_parms)
+    # Names are resolved in ``parms`` only.
+    parms["__builtins__"] = {}
     try:
-        result = eval(expr, parms)
+        # pylint: disable=eval-used
+        result = eval(_compile_expr(expr), parms)
         return result
     except NameError:
         pass

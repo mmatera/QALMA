@@ -74,3 +74,13 @@ system gives the entropies and negativities of the bosonic RPA state
    :undoc-members:
    :show-inheritance:
    :no-index:
+
+If the mean-field state breaks a continuous symmetry, the bosonic problem has
+zero modes. They are detected and removed (their number is given by
+:meth:`~qalma.meanfield.rpa.RPAGibbsDensityOperator.rpa_zero_modes`), the
+orientation of the order parameter is fixed, and the symmetry must be restored
+with the ``symmetry_projections`` of the state, for instance
+``project_conserved_quantity`` for a U(1) symmetry. The thermal fluctuations of
+the conserved charge conjugate to each zero mode are included in the hybrid
+reduction. The entropies and negativities of the full bosonization are not
+defined in the presence of zero modes.

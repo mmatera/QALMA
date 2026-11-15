@@ -122,17 +122,57 @@ dataclass with the following attributes:
 Saving and loading results
 --------------------------
 
-:class:`~qalma.evolution.simulation.Simulation` supports HDF5 serialization::
+:class:`~qalma.evolution.simulation.Simulation` objects are stored as HDF5
+files::
 
     sim.save_hdf5("my_simulation.h5")
 
-    from qalma.evolution.simulation import Simulation
-    sim2 = Simulation.load("my_simulation.h5")
+    from qalma.evolution import Simulation
+    sim2 = Simulation.load_hdf5("my_simulation.h5")
 
-States are stored compressed and loaded on demand via the
-:class:`~qalma.evolution.simulation.SimulationHDF5` interface, avoiding
-memory saturation for long simulations.
+``load_hdf5`` returns a
+:class:`~qalma.evolution.simulation.SimulationHDF5`, which loads each state
+when it is accessed, avoiding memory saturation for long simulations.
+States can also be added to the file as they are computed::
+
+    sim2.states.append(k_t)          # written to the file
+    sim2.time_span.append(t)
+    sim2.save_hdf5()                 # update parameters, stats, expect_ops, time_span
+
+The files do not contain Python pickles: the system, the operators and the
+states are stored as numbers, strings and arrays, so the files can be read
+from other languages, inspected with ``h5dump``, and opened safely even if
+they come from someone else. The layout is described in :doc:`hdf5_format`.
+
+Some things cannot be stored that way:
+
+* The ``symmetry_projections`` of a
+  :class:`~qalma.operators.states.GibbsDensityOperator` are functions. The
+  state is stored without them, with a
+  :class:`qalma.io.IncompleteStateWarning`.
+* Arbitrary Python objects in ``parameters``, ``stats`` or ``expect_ops``
+  raise a ``TypeError``. Numbers, strings, arrays, operators, and lists,
+  tuples and dicts of them are supported. ``save_hdf5(..., allow_pickle=True)``
+  stores any other object as a pickle; the file then needs
+  ``load_hdf5(..., allow_pickle=True)``.
+
+:func:`~qalma.evolution.adaptive_projected_evolution` can write the partial
+result after each step, with ``checkpoint_file="run.h5"``.
+
+Files written by older versions of QALMA
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+HDF5 files written before QALMA 1.0 store the system and the states as
+pickles. They are read-only, and have to be opened explicitly with::
+
+    sim = Simulation.load_hdf5("old.h5", allow_pickle=True)
+
+Loading a pickle can run arbitrary code, so do it only with files that you
+trust. ``tools/pickle_to_hdf5.py`` in the repository converts those files,
+and pickles of ``Simulation`` objects, to the current format; so does
+``sim.save_hdf5("new.h5")``.
 
 .. seealso::
 
-   :doc:`/api/evolution`, :doc:`/api/scalarprod`
+   :doc:`hdf5_format`, :doc:`/api/evolution`, :doc:`/api/io`,
+   :doc:`/api/scalarprod`

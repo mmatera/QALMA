@@ -10,6 +10,7 @@ import logging as _logging
 from . import (
     evolution,
     geometry,
+    io,
     maxent,
     meanfield,
     model,
@@ -43,6 +44,7 @@ __all__ = [
     "model_from_alps_xml",
     # Core subpackages
     "evolution",
+    "io",
     "maxent",
     "meanfield",
     "operators",
